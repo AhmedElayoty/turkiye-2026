@@ -1,0 +1,6 @@
+# plaintext content, raw PDFs and the passphrase never leave this machine
+build/
+*.log
+.DS_Store
+Thumbs.db
+.claude/

@@ -1,0 +1,74 @@
+{
+ "v": 1,
+ "kdf": {
+  "name": "PBKDF2",
+  "hash": "SHA-256",
+  "iterations": 600000,
+  "salt": "h74UiCEBIXAogfSpxp0iyg=="
+ },
+ "cipher": "AES-GCM-256",
+ "files": {
+  "probe": {
+   "path": "vault/probe.enc",
+   "bytes": 43,
+   "mime": "text/plain",
+   "name": "probe"
+  },
+  "content": {
+   "path": "vault/content.enc",
+   "bytes": 62358,
+   "mime": "application/json",
+   "name": "content.json"
+  },
+  "hotel-antalya-concorde": {
+   "path": "vault/hotel-antalya-concorde.enc",
+   "bytes": 159913,
+   "mime": "application/pdf",
+   "name": "hotel-antalya-concorde.pdf",
+   "sha256": "d5956a5c475d5a89"
+  },
+  "hotel-istanbul-arise": {
+   "path": "vault/hotel-istanbul-arise.enc",
+   "bytes": 118872,
+   "mime": "application/pdf",
+   "name": "hotel-istanbul-arise.pdf",
+   "sha256": "efefe2c307b3fdca"
+  },
+  "hotel-istanbul-swissotel": {
+   "path": "vault/hotel-istanbul-swissotel.enc",
+   "bytes": 127151,
+   "mime": "application/pdf",
+   "name": "hotel-istanbul-swissotel.pdf",
+   "sha256": "b79a600df981c29c"
+  },
+  "flight-auh-ayt": {
+   "path": "vault/flight-auh-ayt.enc",
+   "bytes": 155307,
+   "mime": "application/pdf",
+   "name": "flight-auh-ayt.pdf",
+   "sha256": "8b2f8510f811b841"
+  },
+  "flight-ayt-ist": {
+   "path": "vault/flight-ayt-ist.enc",
+   "bytes": 152817,
+   "mime": "application/pdf",
+   "name": "flight-ayt-ist.pdf",
+   "sha256": "3913ee64afd9c55c"
+  },
+  "flight-ist-dxb": {
+   "path": "vault/flight-ist-dxb.enc",
+   "bytes": 310005,
+   "mime": "application/pdf",
+   "name": "flight-ist-dxb.pdf",
+   "sha256": "03f05cb61f6c03ce"
+  },
+  "itinerary-docx": {
+   "path": "vault/itinerary-docx.enc",
+   "bytes": 62319,
+   "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+   "name": "itinerary.docx",
+   "sha256": "e3995bf9c898d43b"
+  }
+ },
+ "built": "2026-09-14T12:45:21"
+}
