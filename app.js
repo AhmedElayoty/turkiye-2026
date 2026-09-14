@@ -404,7 +404,7 @@ function renderTips() {
 function renderAll() {
   $('#topbarSub').textContent = (() => { const st = tripStatus(); if (st.phase === 'before') return `${st.days} days to go`; if (st.phase === 'after') return 'Welcome home'; const d = dayByDate(todayISO()); return `${dayLabel(st.dayNum)} · ${d.city}`; })();
   renderToday(); renderDays(); renderBookings(); renderMoney(); renderTips();
-  showTab(state.tab);
+  showTab(state.tab); updInstBar();
   $('#versionLine').textContent = `Content v${C().meta.version} · generated ${C().meta.generated} · vault built ${state.manifest?.built || ''}`;
   $('#rateInput').value = state.rate;
 }
@@ -463,6 +463,24 @@ function renderInstallBox() {
 function openSheet() { renderInstallBox(); $('#sheet').hidden = false; }
 function closeSheet() { $('#sheet').hidden = true; }
 
+/* install bar: shown once unlocked, until installed or dismissed (same behaviour as the Goalak app) */
+const instDismissed = () => store.get('tr26.inst_optout', false) === true;
+function updInstBar() {
+  const bar = $('#instBar'); if (!bar) return;
+  const hide = !state.content || isStandalone() || instDismissed();
+  bar.hidden = hide; $('#app').classList.toggle('has-instbar', !hide);
+}
+function dismissInstBar() { store.set('tr26.inst_optout', true); updInstBar(); }
+async function installApp() {
+  if (state.deferredInstall) {
+    const ev = state.deferredInstall; state.deferredInstall = null;
+    try { ev.prompt(); const { outcome } = await ev.userChoice; if (outcome === 'accepted') { store.set('tr26.inst_optout', true); toast('Installing…'); } } catch {}
+    updInstBar(); return;
+  }
+  // no native prompt available (iPhone, or the browser has not offered one yet): show the steps
+  openSheet();
+}
+
 /* ───────────────────────── events ───────────────────────── */
 function wire() {
   $('#lockForm').addEventListener('submit', (e) => { e.preventDefault(); unlockWith($('#pass').value, $('#remember').checked); });
@@ -499,7 +517,10 @@ function wire() {
     const ex = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, date: $('#expDate').value || todayISO(), amount, cur, cat: $('#expCat').value, note: $('#expNote').value.trim(), aed: cur === 'TRY' ? amount / state.rate : amount };
     state.expenses.push(ex); store.set('tr26.expenses', state.expenses); renderMoney(); renderToday(); toast(`Added ${fmtAed(ex.aed)}`);
   });
-  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); state.deferredInstall = e; });
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); state.deferredInstall = e; updInstBar(); });
+  window.addEventListener('appinstalled', () => { store.set('tr26.inst_optout', true); state.deferredInstall = null; updInstBar(); toast('Installed. Find it on your home screen.'); });
+  $('#instBtn').addEventListener('click', installApp);
+  $('#instDismiss').addEventListener('click', dismissInstBar);
   document.addEventListener('visibilitychange', () => { if (!document.hidden && state.content) renderToday(); });
 }
 
