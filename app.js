@@ -1,5 +1,6 @@
 /* Türkiye 2026 · trip companion
    All personal content arrives encrypted from ./vault and is decrypted in the browser. */
+import { ICONS } from './icons.js';
 
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -9,49 +10,7 @@ const state = {
   rate: 12.22, tab: 'today', dayId: null,
   expenses: [], todosDone: {}, deferredInstall: null, blobUrls: [],
 };
-
-/* ───────────────────────── icons ───────────────────────── */
-const P = {
-  today: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h3v3H8z"/>',
-  days:  '<path d="M9 18l-6 3V6l6-3 6 3 6-3v15l-6 3-6-3z"/><path d="M9 3v15M15 6v15"/>',
-  ticket:'<path d="M3 9a2 2 0 0 0 2-2V5h14v2a2 2 0 0 0 0 4v2a2 2 0 0 0 0 4v2H5v-2a2 2 0 0 0-2-2z"/><path d="M13 5v14" stroke-dasharray="2 3"/>',
-  wallet:'<rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M16 15h2"/>',
-  bulb:  '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 1 4 10.5c-.7.6-1 1.3-1 2.5H9c0-1.2-.3-1.9-1-2.5A6 6 0 0 1 12 3z"/>',
-  settings:'<path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
-  pin:   '<path d="M12 21s-7-7.6-7-12a7 7 0 0 1 14 0c0 4.4-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/>',
-  phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.1 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.9.6 2.8.7a2 2 0 0 1 1.7 2z"/>',
-  copy:  '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
-  taxi:  '<path d="M5 17H3v-5l2-5h14l2 5v5h-2"/><path d="M5 12h14"/><circle cx="7.5" cy="17" r="2"/><circle cx="16.5" cy="17" r="2"/><path d="M9 7V4h6v3"/>',
-  ferry: '<path d="M3 18c1.5 1 3 1 4.5 0s3-1 4.5 0 3 1 4.5 0 3-1 4.5 0"/><path d="M4 15l1.5-4h13L20 15"/><path d="M7 11V7h10v4"/><path d="M11 7V4h2v3"/>',
-  walk:  '<circle cx="13" cy="4" r="1.6"/><path d="M8 21l3-7 2 2v5"/><path d="M11 14l-1-4 3-2 2 3 3 1"/><path d="M10 10l-3 3"/>',
-  plane: '<path d="M2 12l20-8-8 20-2-9z"/>',
-  bus:   '<rect x="4" y="3" width="16" height="15" rx="2"/><path d="M4 10h16M8 18v3M16 18v3"/><circle cx="8" cy="14" r="1"/><circle cx="16" cy="14" r="1"/>',
-  food:  '<path d="M4 3v7a3 3 0 0 0 6 0V3M7 3v18"/><path d="M17 3c-2 0-3 3-3 6s1 4 3 4v8"/>',
-  bed:   '<path d="M3 18v-7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v7"/><path d="M3 18h18M5 9V6a1 1 0 0 1 1-1h5v4M13 9V5h5a1 1 0 0 1 1 1v3"/>',
-  camera:'<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>',
-  smoke: '<path d="M4 20h10"/><path d="M9 20v-6"/><path d="M6 14h6"/><path d="M9 14V9"/><path d="M15 8c1-1 1-2 0-3s-1-2 0-3M19 10c1-1 1-2 0-3s-1-2 0-3"/>',
-  bag:   '<path d="M6 7h12l1 14H5z"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/>',
-  sun:   '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
-  info:  '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h0"/>',
-  alert: '<path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h0"/>',
-  check: '<path d="M20 6L9 17l-5-5"/>',
-  lock:  '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
-  download:'<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
-  external:'<path d="M14 3h7v7"/><path d="M21 3l-9 9"/><path d="M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/>',
-  close: '<path d="M18 6L6 18M6 6l12 12"/>',
-  chev:  '<path d="M9 6l6 6-6 6"/>',
-  receipt:'<path d="M5 3h14v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5L7 21l-2-1.5z"/><path d="M9 8h6M9 12h6M9 16h4"/>',
-  fish:  '<path d="M3 12c3-4 7-6 11-6 3 0 5 2 7 6-2 4-4 6-7 6-4 0-8-2-11-6z"/><path d="M3 12l-1-4M3 12l-1 4"/><circle cx="16" cy="11" r="1"/>',
-  mosque:'<path d="M4 21V12a8 8 0 0 1 16 0v9"/><path d="M2 21h20M12 4V2M9 12h6v9H9z"/>',
-  chat:  '<path d="M21 12a8 8 0 0 1-8 8H8l-5 3 1.5-4.5A8 8 0 1 1 21 12z"/>',
-  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
-  home:  '<path d="M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"/>',
-  plus:  '<path d="M12 5v14M5 12h14"/>',
-  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
-  route: '<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h6a4 4 0 0 0 0-8H9a4 4 0 0 1 0-8h7"/>',
-};
-const ico = (n, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || P.info}</svg>`;
+const ico = (n, cls = '') => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ICONS.info}</svg>`;
 
 /* ───────────────────────── utils ───────────────────────── */
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -76,10 +35,10 @@ const nowMinutes = () => { const d = new Date(); return d.getHours() * 60 + d.ge
 const cityFor = (day) => /Antalya/.test(day.city) && !/Istanbul/.test(day.title) ? 'Antalya' : 'Istanbul';
 const mapsSearch = (q, city) => {
   const hasCity = /istanbul|antalya|dubai|abu dhabi/i.test(q);
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(hasCity ? q : `${q}, ${city}`)}`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(hasCity || !city ? q : `${q}, ${city}`)}`;
 };
 const mapsDir = (from, to, mode, city) => {
-  const tm = mode === 'walk' ? 'walking' : mode === 'ferry' || mode === 'bus' || mode === 'tram' ? 'transit' : 'driving';
+  const tm = mode === 'walk' ? 'walking' : (mode === 'ferry' || mode === 'bus' || mode === 'tram') ? 'transit' : 'driving';
   const fix = (q) => /istanbul|antalya|dubai|abu dhabi|airport/i.test(q) ? q : `${q}, ${city}`;
   return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(fix(from))}&destination=${encodeURIComponent(fix(to))}&travelmode=${tm}`;
 };
@@ -121,24 +80,15 @@ async function loadManifest() {
 async function deriveKey(pass) {
   const m = await loadManifest();
   const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass.normalize('NFKC')), 'PBKDF2', false, ['deriveKey']);
-  return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt: b64d(m.kdf.salt), iterations: m.kdf.iterations, hash: 'SHA-256' },
-    base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: b64d(m.kdf.salt), iterations: m.kdf.iterations, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
 }
 async function fetchEnc(path) { const r = await fetch(path); if (!r.ok) throw new Error(path); return new Uint8Array(await r.arrayBuffer()); }
-async function decryptBytes(key, buf) {
-  const iv = buf.slice(0, 12), ct = buf.slice(12);
-  return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct));
-}
+async function decryptBytes(key, buf) { const iv = buf.slice(0, 12), ct = buf.slice(12); return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct)); }
 async function keyWorks(key) {
   try { const m = await loadManifest(); const p = await decryptBytes(key, await fetchEnc('./' + m.files.probe.path)); return new TextDecoder().decode(p) === 'turkiye-2026-ok'; }
   catch { return false; }
 }
-async function loadContent(key) {
-  const m = await loadManifest();
-  const plain = await decryptBytes(key, await fetchEnc('./' + m.files.content.path));
-  return JSON.parse(new TextDecoder().decode(plain));
-}
+async function loadContent(key) { const m = await loadManifest(); const plain = await decryptBytes(key, await fetchEnc('./' + m.files.content.path)); return JSON.parse(new TextDecoder().decode(plain)); }
 
 /* ───────────────────────── lock flow ───────────────────────── */
 const lockMsg = (t, err = false) => { const el = $('#lockMsg'); el.textContent = t; el.classList.toggle('err', err); };
@@ -157,8 +107,7 @@ async function tryAutoUnlock() {
   const key = await idbGet('key');
   if (!key) return false;
   if (!(await keyWorks(key))) { await idbDel('key'); return false; }
-  await boot(key);
-  return true;
+  await boot(key); return true;
 }
 async function boot(key) {
   state.key = key;
@@ -168,7 +117,7 @@ async function boot(key) {
   state.todosDone = store.get('tr26.todos', {});
   const t = todayISO();
   const inTrip = state.content.days.find(d => d.date === t);
-  state.dayId = inTrip ? inTrip.id : (t > state.content.meta.tripEnd ? state.content.days.at(-1).id : state.content.days[0].id);
+  state.dayId = inTrip ? inTrip.id : (t > state.content.meta.tripEnd ? state.content.days.at(-1).id : state.content.days[1].id);
   $('#lock').hidden = true; $('#app').hidden = false;
   renderAll();
 }
@@ -179,7 +128,7 @@ function lockNow(forget = false) {
   $('#unlockBtn').disabled = false; closeSheet();
 }
 
-/* ───────────────────────── render: shared ───────────────────────── */
+/* ───────────────────────── shared ───────────────────────── */
 const C = () => state.content;
 const dayByDate = (iso) => C().days.find(d => d.date === iso);
 const dayIndex = (id) => C().days.findIndex(d => d.id === id);
@@ -189,7 +138,7 @@ function tripStatus() {
   if (t < m.tripStart) return { phase: 'before', days: daysBetween(t, m.tripStart) };
   if (t > m.tripEnd) return { phase: 'after' };
   const idx = dayIndex(dayByDate(t)?.id);
-  return { phase: 'during', idx, dayNum: idx };  // d10 is 0 = departure night, d11 = Day 1
+  return { phase: 'during', idx, dayNum: idx };
 }
 function hotelForDate(iso) {
   if (iso >= '2026-10-11' && iso <= '2026-10-14') return bookingById('hotel-antalya-concorde');
@@ -202,9 +151,10 @@ function nextFlight(iso) {
   if (iso <= '2026-10-25') return bookingById('flight-ist-dxb');
   return null;
 }
-const stopIcon = (s) => s.type === 'transport' && s.transport ? (P[s.transport.mode] ? s.transport.mode : 'route')
+const stopIcon = (s) => s.type === 'transport' && s.transport ? (ICONS[s.transport.mode] ? s.transport.mode : 'route')
   : ({ flight: 'plane', hotel: 'bed', food: 'food', sight: 'camera', shisha: 'smoke', shop: 'bag', free: 'sun', note: 'info' }[s.type] || 'info');
 const stopDotClass = (s) => s.type === 'transport' && s.transport ? s.transport.mode : s.type;
+const dayLabel = (idx) => idx === 0 ? 'Departure night' : idx === 15 ? 'Home' : `Day ${idx}`;
 
 function copyRow(lbl, val) {
   return `<div class="copyrow"><div><div class="lbl">${esc(lbl)}</div><div class="val mono">${esc(val)}</div></div>
@@ -218,96 +168,97 @@ function todoRow(t) {
     <div><div class="t">${esc(t.title)}</div>
       <div class="d">${overdue ? 'Overdue · was ' : 'Due '}${dateLabel(t.due)}${t.note ? ' · ' + esc(t.note) : ''}</div></div></label>`;
 }
+function placeLink(place, city) {
+  return `<a class="place" href="${mapsSearch(place, city)}" target="_blank" rel="noopener">${ico('pin')}<span>${esc(place)}</span></a>`;
+}
 
-/* ───────────────────────── render: today ───────────────────────── */
+/* ───────────────────────── today ───────────────────────── */
 function renderToday() {
   const t = todayISO(), st = tripStatus(), m = C().meta;
   const day = dayByDate(t);
   let hero;
   if (st.phase === 'before') {
     hero = `<div class="hero-kicker">${st.days === 1 ? 'Tomorrow' : `${st.days} days to go`}</div>
-      <div class="hero-title">${esc(m.subtitle)}</div>
-      <div class="hero-sub">${esc(m.occasion)} · ${C().meta.travellers.join(' & ')}</div>
-      <div class="hero-row"><span class="chip onhero">${ico('plane')} Sat 10 Oct · leave home 22:30</span><span class="chip onhero">${ico('clock')} TR is 1 h behind UAE</span></div>`;
+      <div class="hero-title">Antalya &amp; Istanbul</div>
+      <div class="hero-sub">11 – 25 October 2026 · ${esc(m.occasion)}</div>
+      <div class="hero-row"><span class="chip onhero">${ico('plane')} Leave home Sat 10 Oct, 22:30</span><span class="chip onhero">${ico('clock')} Türkiye is 1 h behind</span></div>`;
   } else if (st.phase === 'after') {
-    hero = `<div class="hero-kicker">Welcome home</div><div class="hero-title">Türkiye 2026</div><div class="hero-sub">Log the last expenses while you remember them.</div>`;
+    hero = `<div class="hero-kicker">Welcome home</div><div class="hero-title">Antalya &amp; Istanbul</div><div class="hero-sub">Log the last expenses while you remember them.</div>`;
   } else {
-    hero = `<div class="hero-kicker">${st.dayNum === 0 ? 'Departure night' : `Day ${st.dayNum} of 15`} · ${esc(day.city)}</div>
+    hero = `<div class="hero-kicker">${dayLabel(st.dayNum)} · ${esc(day.city)}</div>
       <div class="hero-title">${esc(day.title)}</div><div class="hero-sub">${esc(day.vibe || '')}</div>
-      <div class="hero-row">${day.sunset ? `<span class="chip onhero">${ico('sun')} Sunset ${day.sunset}</span>` : ''}${day.weather ? `<span class="chip onhero">${esc(day.weather)}</span>` : ''}
-        <span class="chip onhero">${ico('wallet')} ${fmtAed(day.estAed[0])}–${nf0.format(day.estAed[1])} today</span></div>`;
+      <div class="hero-row">${day.sunset ? `<span class="chip onhero">${ico('sunset')} Sunset ${day.sunset}</span>` : ''}
+        ${day.estAed?.[1] ? `<span class="chip onhero">${ico('wallet')} ${fmtAed(day.estAed[0])}–${nf0.format(day.estAed[1])} today</span>` : ''}</div>`;
   }
 
   // next up
   let next = '';
   if (day) {
     const now = nowMinutes();
-    const timed = day.stops.filter(s => parseHM(s.time) != null);
-    const up = timed.find(s => parseHM(s.time) >= now - 10) || null;
+    const up = day.stops.filter(s => parseHM(s.time) != null).find(s => parseHM(s.time) >= now - 10) || null;
     if (up) {
       next = `<div class="card"><div class="card-title">${ico('clock')} Next up</div>
         <div class="nextup"><div class="nextup-time">${esc(up.time)}</div>
-        <div><div class="nextup-title">${esc(up.title)}</div>${up.place ? `<a class="place" href="${mapsSearch(up.place, cityFor(day))}" target="_blank" rel="noopener">${ico('pin')} ${esc(up.place)}</a>` : ''}
+        <div><div class="nextup-title">${esc(up.title)}</div>${up.place ? placeLink(up.place, cityFor(day)) : ''}
         ${up.transport ? `<div class="small muted" style="margin-top:4px">${esc(up.transport.from)} → ${esc(up.transport.to)}${up.transport.mins ? ` · ${esc(up.transport.mins)} min` : ''}</div>` : ''}</div></div>
-        <div class="row" style="margin-top:12px"><button class="linkbtn teal" data-goto-day="${day.id}">${ico('days')} Open today's plan</button></div></div>`;
+        <div class="row" style="margin-top:14px"><button class="btn teal" data-goto-day="${day.id}">${ico('days')} Open today's plan</button></div></div>`;
     } else {
       const nxt = C().days[dayIndex(day.id) + 1];
-      next = `<div class="card"><div class="card-title">${ico('clock')} Today is done</div>
-        <p>${nxt ? `Tomorrow: <b>${esc(nxt.title)}</b>. First stop ${esc(nxt.stops[0].time)} · ${esc(nxt.stops[0].title)}.` : 'Safe travels home.'}</p>
-        ${nxt ? `<div class="row" style="margin-top:10px"><button class="linkbtn" data-goto-day="${nxt.id}">${ico('arrow')} Preview tomorrow</button></div>` : ''}</div>`;
+      next = `<div class="card"><div class="card-title">${ico('check')} Today is done</div>
+        <p>${nxt ? `Tomorrow: <b>${esc(nxt.title)}</b>. First stop ${esc(nxt.stops[0].time)}, ${esc(nxt.stops[0].title)}.` : 'Safe travels home.'}</p>
+        ${nxt ? `<div class="row" style="margin-top:12px"><button class="btn" data-goto-day="${nxt.id}">${ico('arrow')} Preview tomorrow</button></div>` : ''}</div>`;
     }
   } else if (st.phase === 'before') {
-    const d0 = C().days[0];
+    const d0 = C().days[0], s = d0.stops[1];
     next = `<div class="card"><div class="card-title">${ico('clock')} First move</div>
-      <div class="nextup"><div class="nextup-time">${esc(d0.stops[1].time)}</div><div><div class="nextup-title">${esc(d0.stops[1].title)}</div><div class="small muted">Sat 10 Oct · TK869 departs 01:30</div></div></div>
-      <div class="row" style="margin-top:12px"><button class="linkbtn teal" data-goto-day="d11">${ico('days')} Open day one</button></div></div>`;
+      <div class="nextup"><div class="nextup-time">${esc(s.time)}</div><div><div class="nextup-title">${esc(s.title)}</div><div class="small muted" style="margin-top:3px">Saturday 10 October · TK869 departs 01:30</div></div></div>
+      <div class="row" style="margin-top:14px"><button class="btn teal" data-goto-day="d11">${ico('days')} Open day one</button><button class="btn" data-goto-day="d10">Departure night</button></div></div>`;
+  }
+
+  // deadline strip (Swissôtel)
+  const sw = bookingById('hotel-istanbul-swissotel');
+  let dl = '';
+  if (sw && sw.status === 'to-cancel' && !state.todosDone['t-swiss']) {
+    const hrs = Math.round((new Date(sw.deadline) - Date.now()) / 3600000), dys = Math.floor(hrs / 24);
+    const when = hrs <= 0 ? 'has passed' : dys >= 2 ? `in ${dys} days` : `in ${hrs} h`;
+    dl = `<div class="strip-alert ${dys < 4 ? 'red' : ''}">${ico('bell')}<span>Cancel the Swissôtel · full refund ends ${when}</span><button data-open-doc="hotel-istanbul-swissotel">Open</button></div>`;
   }
 
   // hotel tonight
   const h = hotelForDate(t) || (st.phase === 'before' ? bookingById('hotel-antalya-concorde') : null);
   const hotel = h ? `<div class="card"><div class="card-title">${ico('bed')} ${hotelForDate(t) ? 'Tonight' : 'First hotel'}</div>
       <h3>${esc(h.title)}</h3><div class="bk-sub">${esc(h.dates)} · check-in ${esc(h.checkin)}</div>
-      <div class="stack" style="margin-top:10px">${copyRow('Confirmation', h.confirmation)}${copyRow('PIN', h.pin)}</div>
-      <div class="bk-actions"><a class="linkbtn" href="tel:${h.phone.replace(/\s/g, '')}">${ico('phone')} Call</a>
-        <a class="linkbtn" href="${mapsSearch(h.maps, '')}" target="_blank" rel="noopener">${ico('pin')} Directions</a>
-        <button class="linkbtn" data-open-doc="${h.id}">${ico('ticket')} Confirmation</button></div></div>` : '';
+      <div class="stack" style="margin-top:12px">${copyRow('Confirmation', h.confirmation)}${copyRow('PIN', h.pin)}</div>
+      <div class="bk-actions"><a class="btn" href="tel:${h.phone.replace(/\s/g, '')}">${ico('phone')} Call</a>
+        <a class="btn" href="${mapsSearch(h.maps, '')}" target="_blank" rel="noopener">${ico('navigation')} Directions</a>
+        <button class="btn" data-open-doc="${h.id}">${ico('ticket')} PDF</button></div></div>` : '';
 
   // next flight
   const f = nextFlight(t);
   const flight = f ? `<div class="card"><div class="card-title">${ico('plane')} Next flight</div>
       <h3>${esc(f.title)}</h3><div class="bk-sub">${esc(f.subtitle)} · ${esc(f.dates)}</div>
       <div class="legs">${f.legs.map(l => `<div class="legrow"><div class="fl">${esc(l.flight)}</div><div class="times">${esc(l.from)} → ${esc(l.to)}</div><div class="seat">${esc(l.seats)}</div></div>`).join('')}</div>
-      <div class="stack" style="margin-top:10px">${copyRow('Booking reference', f.confirmation)}</div>
-      <div class="bk-actions"><button class="linkbtn" data-open-doc="${f.id}">${ico('ticket')} Ticket</button></div></div>` : '';
+      <div class="stack" style="margin-top:12px">${copyRow('Booking reference', f.confirmation)}</div>
+      <div class="bk-actions"><button class="btn" data-open-doc="${f.id}">${ico('ticket')} Ticket</button></div></div>` : '';
 
-  // to-dos due within 7 days or overdue
+  // to-dos
   const openTodos = C().todos.filter(x => !state.todosDone[x.id]).sort((a, b) => a.due.localeCompare(b.due));
   const soon = openTodos.filter(x => daysBetween(t, x.due) <= 10);
   const due = (soon.length ? soon : openTodos).slice(0, 6);
-  const todos = due.length ? `<div class="card"><div class="card-title">${ico('check')} ${soon.length ? 'Coming up' : 'Next to book'}</div>${due.map(todoRow).join('')}
-      <div class="row" style="margin-top:10px"><button class="linkbtn" data-tab-go="bookings" data-scroll="todos">${ico('arrow')} All to-dos</button></div></div>` : '';
+  const todos = due.length ? `<div class="card"><div class="card-title">${ico('list')} ${soon.length ? 'Coming up' : 'Next to book'}</div>${due.map(todoRow).join('')}
+      <div class="row" style="margin-top:12px"><button class="btn" data-tab-go="bookings" data-scroll="todos">${ico('arrow')} All ${openTodos.length} to-dos</button></div></div>` : '';
 
-  // deadline card for Swissôtel
-  const sw = bookingById('hotel-istanbul-swissotel');
-  let dl = '';
-  if (sw && sw.status === 'to-cancel' && !state.todosDone['t-swiss']) {
-    const hrs = Math.round((new Date(sw.deadline) - Date.now()) / 3600000);
-    dl = `<div class="card" style="border:1px solid var(--red)"><div class="deadline">${ico('alert')} ${hrs > 0 ? `Swissôtel refund deadline in ${hrs > 48 ? Math.floor(hrs / 24) + ' days' : hrs + ' h'}` : 'Swissôtel refund deadline has PASSED'}</div>
-      <p class="small" style="margin-top:8px">Full refund only before 23:59 on 11 Oct. You are holding both Istanbul hotels until then.</p>
-      <div class="row" style="margin-top:10px"><button class="linkbtn" data-open-doc="hotel-istanbul-swissotel">${ico('ticket')} Swissôtel booking</button></div></div>`;
-  }
-
-  // spend so far
+  // spend
   const spent = state.expenses.reduce((a, e) => a + e.aed, 0);
   const money = state.expenses.length ? `<div class="card"><div class="card-title">${ico('wallet')} Spent so far</div>
       <div class="row between"><div class="big">${fmtAed(spent)}</div><div class="small muted" style="text-align:right">of ${fmtAed(C().money.variable.low)}–${nf0.format(C().money.variable.high)}<br>planned for extras</div></div>
-      <div class="bar" style="margin-top:8px"><i style="width:${Math.min(100, spent / C().money.variable.high * 100)}%"></i><b class="low" style="left:${C().money.variable.low / C().money.variable.high * 100}%"></b></div>
-      <div class="row" style="margin-top:10px"><button class="linkbtn" data-tab-go="money">${ico('plus')} Add expense</button></div></div>` : '';
+      <div class="bar" style="margin-top:10px"><i style="width:${Math.min(100, spent / C().money.variable.high * 100)}%"></i><b style="left:${C().money.variable.low / C().money.variable.high * 100}%"></b></div>
+      <div class="row" style="margin-top:12px"><button class="btn" data-tab-go="money">${ico('plus')} Add expense</button></div></div>` : '';
 
   $('#view-today').innerHTML = `<div class="card hero">${hero}</div>${next}${dl}${hotel}${flight}${todos}${money}`;
 }
 
-/* ───────────────────────── render: days ───────────────────────── */
+/* ───────────────────────── days ───────────────────────── */
 function renderDays() {
   const t = todayISO();
   const strip = `<div class="strip" id="strip">${C().days.map(d => {
@@ -315,32 +266,39 @@ function renderDays() {
     return `<button class="daychip ${d.id === state.dayId ? 'is-active' : ''} ${d.date === t ? 'is-today' : ''}" data-day="${d.id}" data-phase="${esc(d.phase)}">
       <div class="dow">${DOW[dt.getDay()]}</div><div class="num">${dt.getDate()}</div><span class="dot"></span></button>`; }).join('')}</div>`;
   const d = C().days.find(x => x.id === state.dayId) || C().days[0];
-  const idx = dayIndex(d.id), city = cityFor(d);
-  const head = `<div class="card dayhead"><div class="kicker">${idx === 0 ? 'Departure' : idx === 15 ? 'Home' : `Day ${idx}`} · ${dateLabel(d.date)} · ${esc(d.city)}</div>
+  const idx = dayIndex(d.id), city = cityFor(d), isToday = d.date === t, now = nowMinutes();
+  const head = `<div class="card dayhead"><div class="kicker">${dayLabel(idx)} · ${dateLabel(d.date)} · ${esc(d.city)}</div>
     <h2>${esc(d.title)}</h2>${d.vibe ? `<p class="vibe">${esc(d.vibe)}</p>` : ''}
-    <div class="meta">${d.sunset ? `<span class="chip">${ico('sun')} Sunset ${d.sunset}</span>` : ''}${d.weather ? `<span class="chip">${esc(d.weather)}</span>` : ''}
+    <div class="meta">${d.sunset ? `<span class="chip">${ico('sunset')} Sunset ${d.sunset}</span>` : ''}${d.weather ? `<span class="chip">${ico('thermo')} ${esc(d.weather)}</span>` : ''}
       <span class="chip gold">${ico('wallet')} ${d.estAed[1] ? `${fmtAed(d.estAed[0])}–${nf0.format(d.estAed[1])}` : 'Nothing to pay'}</span></div>
-    ${d.fixes?.length ? `<details class="fold" style="margin-top:12px"><summary>${ico('chev', 'chev')} What changed and why (${d.fixes.length})</summary>
-      ${d.fixes.map(f => `<div class="notebox"><b>${esc(f.what)}</b><br><span class="muted">${esc(f.why)}</span></div>`).join('')}</details>` : ''}</div>`;
+    ${d.fixes?.length ? `<details class="fold" style="margin-top:14px"><summary>${ico('chev', 'chev')} What changed and why (${d.fixes.length})</summary>
+      ${d.fixes.map(f => `<div class="notebox"><b>${esc(f.what)}</b><br>${esc(f.why)}</div>`).join('')}</details>` : ''}</div>`;
 
-  const items = d.stops.map(s => {
+  // which stop is "now" (today only): last stop whose time has passed
+  let nowIdx = -1;
+  if (isToday) d.stops.forEach((s, i) => { const hm = parseHM(s.time); if (hm != null && hm <= now) nowIdx = i; });
+
+  const items = d.stops.map((s, i) => {
     const small = parseHM(s.time) == null;
     const tr = s.transport;
-    const leg = tr ? `<div class="leg">${ico(P[tr.mode] ? tr.mode : 'route')}<div><div class="route">${esc(tr.from)}<span class="arr">→</span>${esc(tr.to)}</div>
-        <div class="sub">${[tr.mins ? `${esc(tr.mins)} min` : '', tr.cost ? costText(tr.cost) : '', tr.note ? esc(tr.note) : ''].filter(Boolean).join(' · ')}</div></div>
-        <a href="${mapsDir(tr.from, tr.to, tr.mode, city)}" target="_blank" rel="noopener">Route ${ico('external')}</a></div>` : '';
+    const leg = tr ? `<div class="leg">
+        <div class="leg-top">${ico(ICONS[tr.mode] ? tr.mode : 'route')}<div class="leg-route">${esc(tr.from)}<span class="arr">→</span>${esc(tr.to)}</div></div>
+        <div class="leg-bottom"><div class="leg-meta">${[tr.mins ? `${esc(tr.mins)} min` : '', tr.cost ? costText(tr.cost) : ''].filter(Boolean).join(' · ')}</div>
+          <a class="leg-go" href="${mapsDir(tr.from, tr.to, tr.mode, city)}" target="_blank" rel="noopener">${ico('navigation')} Route</a></div>
+        ${tr.note ? `<div class="leg-note">${esc(tr.note)}</div>` : ''}</div>` : '';
     const tags = [
       s.cost ? `<span class="chip">${ico('wallet')} ${costText(s.cost)}</span>` : '',
-      s.book?.needed ? `<span class="chip violet">${ico('ticket')} Book${s.book.note ? ' · ' + esc(s.book.note) : ''}</span>` : '',
+      s.book?.needed ? `<span class="chip violet">${ico('calcheck')} Book${s.book.note ? ' · ' + esc(s.book.note) : ''}</span>` : '',
       s.booking ? `<button class="chip teal" data-open-doc="${s.booking}">${ico('ticket')} Open booking</button>` : '',
     ].filter(Boolean).join('');
-    return `<li class="tl-item"><div class="tl-time ${small ? 'small' : ''} mono">${esc(s.time)}</div>
+    return `<li class="tl-item ${i === nowIdx ? 'is-now' : ''}">
       <div class="tl-rail"><div class="tl-dot ${stopDotClass(s)}">${ico(stopIcon(s))}</div></div>
-      <div class="tl-card"><div class="title">${esc(s.title)}</div>
-        ${s.place ? `<a class="place" href="${mapsSearch(s.place, city)}" target="_blank" rel="noopener">${ico('pin')} ${esc(s.place)}</a>` : ''}
+      <div class="tl-card">
+        <div class="tl-top"><div class="tl-time ${small ? 'small' : ''} mono">${esc(s.time)}</div><div class="title">${esc(s.title)}</div></div>
+        ${s.place ? placeLink(s.place, city) : ''}
         ${s.detail ? `<p class="detail">${esc(s.detail)}</p>` : ''}${leg}
         ${tags ? `<div class="tags">${tags}</div>` : ''}
-        ${(s.warn || []).map(w => `<div class="warn"><b>Watch out.</b> ${esc(w)}</div>`).join('')}
+        ${(s.warn || []).map(w => `<div class="warn">${ico('alert')}<div>${esc(w)}</div></div>`).join('')}
         ${s.tips?.length ? `<details class="fold"><summary>${ico('chev', 'chev')} Tips (${s.tips.length})</summary>${s.tips.map(x => `<div class="tipbox">${esc(x)}</div>`).join('')}</details>` : ''}
       </div></li>`;
   }).join('');
@@ -350,7 +308,7 @@ function renderDays() {
   const act = $('#strip .is-active'); if (act) act.scrollIntoView({ inline: 'center', block: 'nearest' });
 }
 
-/* ───────────────────────── render: bookings ───────────────────────── */
+/* ───────────────────────── bookings ───────────────────────── */
 function bookingCard(b) {
   const pill = b.status === 'confirmed' ? '<span class="pill green">Confirmed</span>' : b.status === 'to-cancel' ? '<span class="pill red">To cancel</span>' : '<span class="pill grey">Reference</span>';
   const kv = [];
@@ -360,37 +318,36 @@ function bookingCard(b) {
   if (b.cabin) kv.push(['Cabin', b.cabin]); if (b.bags) kv.push(['Bags', b.bags]);
   if (b.price) kv.push(['Paid', b.price]); if (b.guests) kv.push(['Guests', b.guests]); if (b.tickets) kv.push(['Tickets', b.tickets]);
   let deadline = '';
-  if (b.deadline) { const hrs = Math.round((new Date(b.deadline) - Date.now()) / 3600000); deadline = `<div class="deadline" style="margin-top:10px">${ico('alert')} ${hrs > 0 ? `Free cancellation ends in ${hrs > 48 ? Math.floor(hrs / 24) + ' days' : hrs + ' h'}` : 'Free-cancellation window has passed'}</div>`; }
+  if (b.deadline) { const hrs = Math.round((new Date(b.deadline) - Date.now()) / 3600000); deadline = `<div class="deadline" style="margin-top:10px">${ico('bell')} ${hrs > 0 ? `Free cancellation ends in ${hrs > 48 ? Math.floor(hrs / 24) + ' days' : hrs + ' h'}` : 'Free-cancellation window has passed'}</div>`; }
   return `<div class="card" id="bk-${b.id}">
     <div class="bk-head"><div><h3>${esc(b.title)}</h3><div class="bk-sub">${esc(b.subtitle || '')}</div></div>${pill}</div>
     ${b.legs ? `<div class="legs">${b.legs.map(l => `<div class="legrow"><div class="fl">${esc(l.flight)}</div><div><div class="times">${esc(l.from)} → ${esc(l.to)}</div><div class="small muted">${esc(l.aircraft || '')}</div></div><div class="seat">${esc(l.seats || '')}</div></div>`).join('')}</div>` : ''}
     ${b.confirmation ? `<div class="stack" style="margin-top:12px">${copyRow(b.kind === 'flight' ? 'Booking reference' : 'Confirmation number', b.confirmation)}${b.pin ? copyRow('PIN', b.pin) : ''}</div>` : ''}
-    ${kv.length ? `<div class="kv" style="margin-top:12px">${kv.map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>`).join('')}</div>` : ''}
-    ${b.address ? `<p class="small" style="margin-top:10px">${ico('pin')} ${esc(b.address)}${b.gps ? ` <span class="muted mono">(${esc(b.gps)})</span>` : ''}</p>` : ''}
-    ${b.cancel ? `<div class="${b.status === 'to-cancel' ? 'warn' : 'notebox'}" style="margin-top:10px"><b>Cancellation.</b> ${esc(b.cancel)}</div>` : ''}${deadline}
+    ${kv.length ? `<div class="kv" style="margin-top:14px">${kv.map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>`).join('')}</div>` : ''}
+    ${b.address ? `<p class="small muted" style="margin-top:12px">${esc(b.address)}${b.gps ? ` <span class="mono">(${esc(b.gps)})</span>` : ''}</p>` : ''}
+    ${b.cancel ? `<div class="${b.status === 'to-cancel' ? 'warn' : 'notebox'}" style="margin-top:12px">${b.status === 'to-cancel' ? ico('alert') : ''}<div><b>Cancellation.</b> ${esc(b.cancel)}</div></div>` : ''}${deadline}
     ${b.notes?.length ? `<div class="stack" style="margin-top:10px">${b.notes.map(n => `<div class="tipbox">${esc(n)}</div>`).join('')}</div>` : ''}
-    ${b.detail ? `<p class="detail small" style="margin-top:8px">${esc(b.detail)}</p>` : ''}
+    ${b.detail ? `<p class="small muted" style="margin-top:8px">${esc(b.detail)}</p>` : ''}
     <div class="bk-actions">
-      ${b.file ? `<button class="linkbtn teal" data-open-doc="${b.id}">${ico('ticket')} ${b.kind === 'document' ? 'Download' : 'Open PDF'}</button>` : ''}
-      ${b.phone ? `<a class="linkbtn" href="tel:${b.phone.replace(/\s/g, '')}">${ico('phone')} Call</a>` : ''}
-      ${b.maps ? `<a class="linkbtn" href="${mapsSearch(b.maps, '')}" target="_blank" rel="noopener">${ico('pin')} Map</a>` : ''}
-      ${b.via ? `<span class="chip">${esc(b.via)}</span>` : ''}
-    </div></div>`;
+      ${b.file ? `<button class="btn teal" data-open-doc="${b.id}">${b.kind === 'document' ? ico('download') + ' Download' : ico('ticket') + ' Open PDF'}</button>` : ''}
+      ${b.phone ? `<a class="btn" href="tel:${b.phone.replace(/\s/g, '')}">${ico('phone')} Call</a>` : ''}
+      ${b.maps ? `<a class="btn" href="${mapsSearch(b.maps, '')}" target="_blank" rel="noopener">${ico('navigation')} Map</a>` : ''}
+    </div>${b.via ? `<p class="tiny muted" style="margin-top:10px">${esc(b.via)}</p>` : ''}</div>`;
 }
 function renderBookings() {
   const B = C().bookings;
-  const grp = (title, icon, list) => list.length ? `<div class="card-title" style="margin-top:6px">${ico(icon)} ${title}</div>${list.map(bookingCard).join('')}` : '';
+  const grp = (title, icon, list) => list.length ? `<div class="card-title" style="margin-top:8px">${ico(icon)} ${title}</div>${list.map(bookingCard).join('')}` : '';
   const todosAll = [...C().todos].sort((a, b) => a.due.localeCompare(b.due));
   const open = todosAll.filter(t => !state.todosDone[t.id]), done = todosAll.filter(t => state.todosDone[t.id]);
   $('#view-bookings').innerHTML =
     grp('Hotels', 'bed', B.filter(b => b.kind === 'hotel')) +
     grp('Flights', 'plane', B.filter(b => b.kind === 'flight')) +
     grp('Documents', 'ticket', B.filter(b => b.kind === 'document')) +
-    `<div class="card" id="todos"><div class="card-title">${ico('check')} To-dos · ${open.length} open</div>${open.map(todoRow).join('') || '<p class="muted">All done.</p>'}
+    `<div class="card" id="todos"><div class="card-title">${ico('list')} To-dos · ${open.length} open</div>${open.map(todoRow).join('') || '<p class="muted">All done.</p>'}
       ${done.length ? `<details class="fold" style="margin-top:10px"><summary>${ico('chev', 'chev')} Done (${done.length})</summary>${done.map(todoRow).join('')}</details>` : ''}</div>`;
 }
 
-/* ───────────────────────── render: money ───────────────────────── */
+/* ───────────────────────── money ───────────────────────── */
 function renderMoney() {
   const M = C().money, v = M.variable;
   const spent = state.expenses.reduce((a, e) => a + e.aed, 0);
@@ -401,13 +358,13 @@ function renderMoney() {
 
   $('#view-money').innerHTML = `
     <div class="card hero"><div class="hero-kicker">Plan for</div><div class="hero-title">${fmtAed(M.planTotal)}</div>
-      <div class="hero-sub">Locked ${fmtAed(M.settledTotal)} + everything else ${fmtAed(v.low)}–${nf0.format(v.high)}</div>
-      <div class="hero-row"><span class="chip onhero">${ico('info')} ₺${state.rate} per AED</span><span class="chip onhero">Live rate ≈ 8 % kinder</span></div></div>
+      <div class="hero-sub">${fmtAed(M.settledTotal)} already locked · ${fmtAed(v.low)}–${nf0.format(v.high)} for everything else</div>
+      <div class="hero-row"><span class="chip onhero">${ico('refresh')} ₺${state.rate} per AED</span><span class="chip onhero">${ico('sparkles')} Live rate is 8 % kinder</span></div></div>
 
     <div class="card"><div class="card-title">${ico('wallet')} Spent so far · extras only</div>
-      <div class="row between"><div class="big">${fmtAed(spent)}</div><div class="small muted" style="text-align:right">low plan ${fmtAed(v.low)}<br>high plan ${fmtAed(v.high)}</div></div>
-      <div class="bar" style="margin-top:8px"><i style="width:${Math.min(100, spent / v.high * 100)}%"></i><b class="low" style="left:${v.low / v.high * 100}%"></b></div>
-      ${Object.keys(byCat).length ? `<div class="row wrap" style="margin-top:10px">${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<span class="chip">${esc(k)} · ${fmtAed(n)}</span>`).join('')}</div>` : ''}
+      <div class="row between"><div class="big">${fmtAed(spent)}</div><div class="small muted" style="text-align:right">plan ${fmtAed(v.low)}<br>ceiling ${fmtAed(v.high)}</div></div>
+      <div class="bar" style="margin-top:12px"><i style="width:${Math.min(100, spent / v.high * 100)}%"></i><b style="left:${v.low / v.high * 100}%"></b></div>
+      ${Object.keys(byCat).length ? `<div class="row wrap" style="margin-top:12px">${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([k, n]) => `<span class="chip">${esc(k)} · ${fmtAed(n)}</span>`).join('')}</div>` : ''}
       <div class="divider"></div>
       <form id="expForm" class="expense-form">
         <label class="field"><span class="field-label">Amount</span><input id="expAmt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0" required></label>
@@ -422,35 +379,32 @@ function renderMoney() {
     </div>
 
     <div class="card"><div class="card-title">${ico('alert')} Where the money goes</div>
-      <p class="small muted" style="margin-bottom:8px">${esc(M.bigThreeNote)}</p>
-      ${M.bigThree.map(b => `<div class="hbar"><div class="lbl">${esc(b.label.split(' · ')[0])}</div><div class="track"><i style="left:${b.low / 1800 * 100}%;width:${(b.high - b.low) / 1800 * 100}%"></i></div><div class="val mono">${fmtAed(b.low)}–${nf0.format(b.high)}</div></div>`).join('')}
-      <div class="warn" style="margin-top:10px"><b>Held twice.</b> ${esc(M.held)}</div></div>
+      <p class="small" style="color:var(--ink-2);margin-bottom:10px">${esc(M.bigThreeNote)}</p>
+      ${M.bigThree.map(b => `<div class="hbar"><div class="lbl">${esc(b.label.split(' · ')[0])}</div><div class="track"><i style="left:${b.low / 1800 * 100}%;width:${(b.high - b.low) / 1800 * 100}%"></i></div><div class="val mono">${nf0.format(b.low)}–${nf0.format(b.high)}</div></div>`).join('')}
+      <div class="warn" style="margin-top:12px">${ico('alert')}<div><b>Held twice.</b> ${esc(M.held)}</div></div></div>
 
-    <div class="card"><div class="card-title">${ico('days')} Estimate by day</div>
+    <div class="card"><div class="card-title">${ico('days')} Estimate by day · AED for two</div>
       ${C().days.filter(d => d.estAed[1] > 0).map(d => `<div class="hbar"><div class="lbl">${dateLabel(d.date, false)}</div><div class="track"><i style="left:${d.estAed[0] / maxEst * 100}%;width:${Math.max(2, (d.estAed[1] - d.estAed[0]) / maxEst * 100)}%"></i></div><div class="val mono">${nf0.format(d.estAed[0])}–${nf0.format(d.estAed[1])}</div></div>`).join('')}
-      <p class="tiny muted" style="margin-top:8px">AED, for two, excluding shopping. Bars show low to high.</p></div>
+      <p class="tiny muted" style="margin-top:8px">Excludes shopping. Bars show low to high.</p></div>
 
     <details class="card fold"><summary>${ico('chev', 'chev')} Locked costs · ${fmtAed(M.settledTotal)}</summary>
       <div class="kv">${M.settled.map(s => `<div class="k">${esc(s.label)}</div><div class="v mono">${fmtAed(s.aed)}</div>`).join('')}</div></details>`;
 }
 
-/* ───────────────────────── render: tips ───────────────────────── */
+/* ───────────────────────── tips ───────────────────────── */
 function renderTips() {
   const linkify = (s) => esc(s).replace(/(\+?\d[\d ]{7,}\d)/g, (m) => `<a href="tel:${m.replace(/\s/g, '')}">${m}</a>`).replace(/\b(112)\b/g, '<a href="tel:112">112</a>');
   $('#view-tips').innerHTML = `<div class="card hero"><div class="hero-kicker">Survival kit</div><div class="hero-title">Read once, then trust it</div>
     <div class="hero-sub">${esc(C().meta.timezoneNote)}</div></div>` +
-    C().tips.sections.map((s, i) => `<details class="card tipsec" style="padding:0" ${i < 2 ? 'open' : ''}><summary><span class="lead">${ico(s.icon)}</span>${esc(s.title)}${ico('chev', 'chev')}</summary>
+    C().tips.sections.map((s, i) => `<details class="card tipsec" ${i < 2 ? 'open' : ''}><summary><span class="lead">${ico(s.icon)}</span>${esc(s.title)}${ico('chev', 'chev')}</summary>
       <ul>${s.items.map(it => `<li>${s.id === 'emergency' ? linkify(it) : esc(it)}</li>`).join('')}</ul></details>`).join('');
 }
 
-/* ───────────────────────── render: all + tabs ───────────────────────── */
+/* ───────────────────────── render all + tabs ───────────────────────── */
 function renderAll() {
-  $('#topbarSub').textContent = (() => { const st = tripStatus(); if (st.phase === 'before') return `${st.days} days to go`; if (st.phase === 'after') return 'Welcome home'; const d = dayByDate(todayISO()); return `${st.dayNum === 0 ? 'Departure night' : 'Day ' + st.dayNum} · ${d.city}`; })();
+  $('#topbarSub').textContent = (() => { const st = tripStatus(); if (st.phase === 'before') return `${st.days} days to go`; if (st.phase === 'after') return 'Welcome home'; const d = dayByDate(todayISO()); return `${dayLabel(st.dayNum)} · ${d.city}`; })();
   renderToday(); renderDays(); renderBookings(); renderMoney(); renderTips();
   showTab(state.tab);
-  $('#settingsBtn').innerHTML = ico('settings');
-  $$('.tab-ico').forEach(el => el.innerHTML = ico(el.dataset.ico));
-  $('#viewerClose').innerHTML = ico('close'); $('#viewerDownload').innerHTML = ico('download'); $('#viewerOpen').innerHTML = ico('external');
   $('#versionLine').textContent = `Content v${C().meta.version} · generated ${C().meta.generated} · vault built ${state.manifest?.built || ''}`;
   $('#rateInput').value = state.rate;
 }
@@ -496,7 +450,7 @@ async function openDoc(id) {
 }
 function closeViewer() { $('#viewer').hidden = true; document.body.style.overflow = ''; $('#viewerBody').innerHTML = ''; state.blobUrls.forEach(u => URL.revokeObjectURL(u)); state.blobUrls = []; }
 
-/* ───────────────────────── settings sheet & install ───────────────────────── */
+/* ───────────────────────── settings & install ───────────────────────── */
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
 function renderInstallBox() {
@@ -525,7 +479,6 @@ function wire() {
   $('#viewerClose').addEventListener('click', closeViewer);
   $('#installBox').addEventListener('click', async (e) => { if (e.target.closest('#installBtn') && state.deferredInstall) { state.deferredInstall.prompt(); await state.deferredInstall.userChoice; state.deferredInstall = null; renderInstallBox(); } });
 
-  // delegated clicks inside the views
   $('#main').addEventListener('click', (e) => {
     const c = e.target.closest('[data-copy]'); if (c) { copyText(c.dataset.copy); return; }
     const d = e.target.closest('[data-day]'); if (d) { state.dayId = d.dataset.day; renderDays(); showTab('days'); return; }
@@ -546,9 +499,8 @@ function wire() {
     const ex = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, date: $('#expDate').value || todayISO(), amount, cur, cat: $('#expCat').value, note: $('#expNote').value.trim(), aed: cur === 'TRY' ? amount / state.rate : amount };
     state.expenses.push(ex); store.set('tr26.expenses', state.expenses); renderMoney(); renderToday(); toast(`Added ${fmtAed(ex.aed)}`);
   });
-
   window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); state.deferredInstall = e; });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && state.content) { renderToday(); } });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && state.content) renderToday(); });
 }
 
 /* ───────────────────────── service worker ───────────────────────── */
@@ -566,6 +518,7 @@ if ('serviceWorker' in navigator) {
 wire();
 $('#settingsBtn').innerHTML = ico('settings');
 $$('.tab-ico').forEach(el => el.innerHTML = ico(el.dataset.ico));
+$('#viewerClose').innerHTML = ico('close'); $('#viewerDownload').innerHTML = ico('download'); $('#viewerOpen').innerHTML = ico('external');
 (async () => {
   try { await loadManifest(); } catch { lockMsg('Cannot reach the vault. Check your connection.', true); }
   if (!(await tryAutoUnlock())) { $('#pass').focus(); }
