@@ -1,5 +1,5 @@
 /* Türkiye 2026 · service worker. VERSION and ASSETS are stamped by build/build.py. */
-const VERSION = '20260914-124521';
+const VERSION = '20260914-124926';
 const ASSETS = [
  "./",
  "./index.html",

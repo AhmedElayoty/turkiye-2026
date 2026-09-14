@@ -479,16 +479,19 @@ async function openDoc(id) {
     }
     if (!pdfjsLib) { pdfjsLib = await import('./vendor/pdf.min.mjs'); pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs'; }
     const doc = await pdfjsLib.getDocument({ data: plain.slice(0) }).promise;
-    body.innerHTML = '';
+    const n = doc.numPages;
+    $('#viewerTitle').textContent = `${b.title} · ${n} page${n > 1 ? 's' : ''}`;
+    body.innerHTML = `<p class="viewer-msg small" id="viewerStatus">Rendering page 1 of ${n}… you can already save or open the file above.</p>`;
     const width = Math.min(body.clientWidth - 16, 900), dpr = Math.min(window.devicePixelRatio || 1, 2);
-    for (let i = 1; i <= doc.numPages; i++) {
+    for (let i = 1; i <= n; i++) {
       const page = await doc.getPage(i);
       const base = page.getViewport({ scale: 1 }); const scale = width / base.width; const vp = page.getViewport({ scale: scale * dpr });
       const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; c.style.width = `${Math.round(vp.width / dpr)}px`;
-      body.appendChild(c);
+      body.insertBefore(c, $('#viewerStatus'));
       await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      const st = $('#viewerStatus'); if (st) st.textContent = i < n ? `Rendering page ${i + 1} of ${n}…` : '';
+      if (i === n) st?.remove();
     }
-    $('#viewerTitle').textContent = `${b.title} · ${doc.numPages} page${doc.numPages > 1 ? 's' : ''}`;
   } catch (e) { console.error(e); body.innerHTML = `<div class="viewer-msg">Could not open this document.<br><span class="small">${esc(e.message || e)}</span></div>`; }
 }
 function closeViewer() { $('#viewer').hidden = true; document.body.style.overflow = ''; $('#viewerBody').innerHTML = ''; state.blobUrls.forEach(u => URL.revokeObjectURL(u)); state.blobUrls = []; }
