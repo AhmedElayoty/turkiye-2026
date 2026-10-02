@@ -243,6 +243,17 @@ function addNote(iso, text) {
   if (!n.text) throw new Error('The note is empty');
   change('notes', n.id, n); return n;
 }
+// a place the chat suggested and they agreed to: shown on the day after the given trip, marked "Optional · as per chat"
+function addStop({ date, place, after = 0, lat = null, lng = null, note = '' }) {
+  const iso = String(date || '').slice(0, 10), d = dayBy(iso);
+  if (!d) throw new Error('That date is not a trip day');
+  const name = String(place || '').trim().slice(0, 80); if (!name) throw new Error('The place name is empty');
+  const at = d.trips.find(t => t.n === +after), why = String(note || '').trim().slice(0, 200);
+  const num = (v, lo, hi) => typeof v === 'number' && isFinite(v) && v >= lo && v <= hi;
+  const n = { id: uid('n'), iso, text: `Optional · as per chat: ${name}${at ? ` (after ${at.to})` : ''}${why ? ` — ${why}` : ''}`, added: new Date().toISOString(),
+    stop: { name, after: at ? at.n : 0, ...(num(lat, 35, 43) && num(lng, 25, 45) ? { lat, lng } : {}), note: why } };
+  change('notes', n.id, n); return n;
+}
 const delNote = (id) => change('notes', id, null);
 const setProgress = (iso, n) => change('progress', iso, n > 0 ? { n } : null);
 const FX = { TRY: (a) => a / state.rate, AED: (a) => a, EUR: (a) => a * C().money.rates.tryPerEur / C().money.rates.tryPerAed, USD: (a) => a * 3.6725 };
@@ -389,6 +400,7 @@ async function boot(key) {
   state.content = content;
   if (store.get('tr26.rate_v', 0) !== 2) { store.del('tr26.rate'); store.set('tr26.rate_v', 2); }   // v1 rate was out of date
   await loadMine();
+  try { await loadChat(); } catch (e) { console.warn('chat load', e); }
   $('#lock').hidden = true; $('#app').hidden = false;
   if (!location.hash) history.replaceState(null, '', location.pathname + location.search + '#today');
   render();
@@ -444,8 +456,14 @@ function hydrate(root) {
 }
 
 /* ───────────── shared pieces ───────────── */
+const stopMap = (n) => n.stop.lat != null ? `https://www.google.com/maps/search/?api=1&query=${n.stop.lat},${n.stop.lng}` : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${n.stop.name} ${dayBy(n.iso)?.city || ''}`)}`;
+const optRow = (n) => `<li class="trip opt"><span class="trip-n">+</span><div class="grow"><div class="trip-mode">Optional · as per chat</div><div class="trip-label" dir="auto">${esc(n.stop.name)}</div>
+    ${n.stop.note ? `<div class="trip-meta" dir="auto">${esc(n.stop.note)}</div>` : ''}<div class="trip-actions"><a class="btn sm ghost" href="${esc(stopMap(n))}" target="_blank" rel="noopener">${ico('pin', 'sm')} Map</a><button class="btn sm ghost" data-del-note="${esc(n.id)}">${ico('trash', 'sm')} Remove</button></div></div></li>`;
 function tripsHtml(trips, { nextN = null, iso = null, actions = true } = {}) {
-  return `<ol class="trips">${trips.map(t => `<li class="trip ${t.n === nextN ? 'is-next' : ''}">
+  // optional stops the chat added go right after their trip (0 = first thing from the hotel)
+  const opt = iso && actions ? (state.notes[iso] || []).filter(n => n.stop) : [], ns = new Set(trips.map(t => t.n));
+  const optAt = (k) => opt.filter(n => n.stop.after === k).map(optRow).join('');
+  return `<ol class="trips">${optAt(0)}${trips.map(t => `<li class="trip ${t.n === nextN ? 'is-next' : ''}">
     <span class="trip-n" style="background:var(--m-${t.mode})">${t.n}</span>
     <div class="grow">
       <div class="trip-mode" style="color:var(--m-${t.mode})">${esc(t.modeText)}${t.n === nextN ? ' · next' : ''}</div>
@@ -454,7 +472,7 @@ function tripsHtml(trips, { nextN = null, iso = null, actions = true } = {}) {
       ${actions ? `<div class="trip-actions">${t.directions ? `<a class="btn sm ghost" href="${esc(t.directions)}" target="_blank" rel="noopener">${ico('navigation', 'sm')} Directions</a>` : ''}${TAXI.has(t.mode) && iso ? `<button class="btn sm ghost" data-drive="${iso}|${t.n}">${ico('taxi', 'sm')} Show driver</button>` : ''}${t.mode === 'flight' && iso && flightFor(iso, t)?.file ? `<button class="btn sm ghost" data-doc="${flightFor(iso, t).file}">${ico('ticket', 'sm')} Ticket</button>` : ''}${iso ? udocsFor(iso, t.n).map(udocBtn).join('') : ''}</div>` : ''}
     </div>
     ${t.time ? `<div class="trip-time">${esc(t.time)}${t.nextDay ? '<small>next day</small>' : ''}</div>` : ''}
-  </li>`).join('')}</ol>`;
+  </li>${optAt(t.n)}`).join('')}${opt.filter(n => n.stop.after && !ns.has(n.stop.after)).map(optRow).join('')}</ol>`;
 }
 function legendHtml(trips) {
   const modes = [...new Set(trips.map(t => t.mode))];
@@ -483,9 +501,12 @@ function udocRow(u, { showDay = true } = {}) {
   return `<div class="doc-row" data-doc="u:${esc(u.id)}" role="button" tabindex="0"><span class="doc-ico">${ico(kindIcon(u.kind))}</span>
     <div class="grow"><b>${esc(u.title)}</b><div class="small">${esc(meta)}</div></div><button class="icon-btn sm" data-udoc-edit="${esc(u.id)}" aria-label="Edit or delete">${ico('pencil', 'sm')}</button></div>`;
 }
-const noteRow = (n) => `<div class="note-row"><span class="doc-ico gold">${ico('note')}</span><div class="grow" dir="auto">${linkify(n.text)}</div><button class="icon-btn sm" data-del-note="${esc(n.id)}" aria-label="Delete note">${ico('trash', 'sm')}</button></div>`;
+const noteRow = (n) => n.stop
+  ? `<div class="note-row"><span class="doc-ico gold">${ico('pin')}</span><div class="grow" dir="auto">${badge('Optional · as per chat', 'gold')} <b>${esc(n.stop.name)}</b>${n.stop.note ? `<div class="small">${esc(n.stop.note)}</div>` : ''}<a class="small" href="${esc(stopMap(n))}" target="_blank" rel="noopener">Map ›</a></div><button class="icon-btn sm" data-del-note="${esc(n.id)}" aria-label="Remove">${ico('trash', 'sm')}</button></div>`
+  : `<div class="note-row"><span class="doc-ico gold">${ico('note')}</span><div class="grow" dir="auto">${linkify(n.text)}</div><button class="icon-btn sm" data-del-note="${esc(n.id)}" aria-label="Delete note">${ico('trash', 'sm')}</button></div>`;
 function mineHtml(iso, today) {
-  const docs = udocsFor(iso), notes = state.notes[iso] || [];
+  // optional stops show inside "How you move" on days with trips, here otherwise
+  const docs = udocsFor(iso), notes = (state.notes[iso] || []).filter(n => !n.stop || !dayBy(iso)?.trips.length);
   if (today && !docs.length && !notes.length) return '';
   return section(today ? 'Your documents & notes today' : 'Your documents & notes') + `<div class="card">${docs.map(u => udocRow(u, { showDay: false })).join('')}${notes.map(noteRow).join('')}
     ${!docs.length && !notes.length ? '<p class="small">Add a ticket or booking for this day, or a note to remember.</p>' : ''}
@@ -748,8 +769,26 @@ function blocksHtml(blocks) {
   }).join('');
 }
 function renderChat(scrollToAnswer = true) {
+  saveChat();
   const box = $('#chat'); if (!box) return;
   box.innerHTML = chatHtml(); hydrate(box); scrollChat(scrollToAnswer);
+}
+// the chat stays on this phone (encrypted like everything else) through restarts and updates; Settings → Clear the chat empties it
+let chatSaveT = null;
+function saveChat() {
+  clearTimeout(chatSaveT);
+  chatSaveT = setTimeout(async () => {
+    if (!state.key || !canSeal()) return;
+    const chat = state.chat.filter(m => !m.typing && !(m.doc && m.working)).slice(-60);
+    try { await idbPut('chat', await sealJSON({ v: 1, chat, ai: state.aiHistory, prev: state.prevOffline || null })); } catch (e) { console.warn('chat save', e); }
+  }, 400);
+}
+async function loadChat() {
+  const c = await openJSON(await idbGet('chat'), null);
+  if (!c || !Array.isArray(c.chat)) return;
+  state.chat = c.chat.map(m => (m.ai ? { ...m, streaming: false, status: null, ...(m.streaming && !m.note ? { note: 'Interrupted: the app was closed while answering.' } : {}) } : m));
+  state.aiHistory = Array.isArray(c.ai) ? c.ai : [];
+  state.prevOffline = c.prev || null;
 }
 function scrollChat(toAnswerTop) {
   const msgs = $$('#chat .msg'); if (!msgs.length) return;
@@ -849,6 +888,7 @@ function aiHandlers() {
     add_todo: (x) => { const t = addUserTodo(x || {}); return { ok: true, id: t.id, title: t.title, due: t.due, time: t.time }; },
     add_expense: (x) => { const e = addExpense(x || {}); return { ok: true, id: e.id, logged: `${e.cur === 'TRY' ? fmtTry(e.amount) : fmtAed(e.amount)} · ${e.cat}`, aed: Math.round(e.aed) }; },
     add_day_note: ({ date, text } = {}) => { const n = addNote(String(date || '').slice(0, 10), text); return { ok: true, id: n.id }; },
+    add_optional_stop: (x = {}) => { const n = addStop(x); return { ok: true, id: n.id, label: `${n.stop.name} · optional on ${dateLabel(n.iso)}`, shownAs: 'Optional · as per chat' }; },
     update_document: async ({ id, ...p } = {}) => {
       const x = u(id);
       if (p.dayIso !== undefined) { if (p.dayIso && !dayBy(p.dayIso)) throw new Error('dayIso must be a trip day'); x.dayIso = p.dayIso || null; x.tripN = null; }
@@ -886,7 +926,7 @@ async function sendAi(q, { voice = false } = {}) {
   let api, lock = null;
   try { lock = await navigator.wakeLock?.request('screen'); } catch {}   // a locked screen kills the stream on iPhone
   const H = aiHandlers();
-  for (const k of ['add_todo', 'add_expense', 'add_day_note', 'update_document']) { const f = H[k]; H[k] = async (x) => { msg.changed = true; return f(x); }; }
+  for (const k of ['add_todo', 'add_expense', 'add_day_note', 'add_optional_stop', 'update_document']) { const f = H[k]; H[k] = async (x) => { msg.changed = true; return f(x); }; }
   try {
     api = await aiApi();
     const res = await api.chatTurn({ apiKey: state.ai.key, model: state.ai.model, webSearch: true, searchKey: setting('searchKey'), history: state.aiHistory, user: { text: q, attachments: [] },
@@ -1661,7 +1701,7 @@ async function act(a, el) {
     case 'forget': if (confirm('Forget the passphrase on this phone? You will need to type it again.')) lockNow(true); break;
     case 'reset-todos': if (confirm('Untick every to-do, on every phone?')) { for (const t of C().todos) if (isDone(t)) setDone(t.id, false); render(); } break;
     case 'reset-exp': if (confirm('Delete every logged expense, on every phone? This cannot be undone.')) { for (const e of state.expenses) delExpense(e.id); render(); } break;
-    case 'reset-chat': state.chat = []; state.aiHistory = []; state.prevOffline = null; toast('Chat cleared'); break;
+    case 'reset-chat': if (confirm('Clear the whole chat on this phone?')) { clearTimeout(chatSaveT); state.chat = []; state.aiHistory = []; state.prevOffline = null; await idbDel('chat'); toast('Chat cleared'); } break;
     case 'add-doc': pickFile(route().a === 'ask' ? 'chat' : 'docs', el.dataset.iso || null); break;
     case 'note-add': if (await ensureWriteKey()) openNoteSheet(el.dataset.iso); break;
     case 'todo-add': openTodoSheet(); break;
