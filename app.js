@@ -889,7 +889,7 @@ async function sendAi(q, { voice = false } = {}) {
   for (const k of ['add_todo', 'add_expense', 'add_day_note', 'update_document']) { const f = H[k]; H[k] = async (x) => { msg.changed = true; return f(x); }; }
   try {
     api = await aiApi();
-    const res = await api.chatTurn({ apiKey: state.ai.key, model: state.ai.model, webSearch: !!state.ai.web, history: state.aiHistory, user: { text: q, attachments: [] },
+    const res = await api.chatTurn({ apiKey: state.ai.key, model: state.ai.model, webSearch: true, searchKey: setting('searchKey'), history: state.aiHistory, user: { text: q, attachments: [] },
       content: C(), live: liveInfo(), handlers: H, signal: ctrl.signal,
       onText: (dt) => { msg.text += dt; msg.status = null; paintMsg(msg); }, onStatus: (s) => { msg.status = s; paintMsg(msg); } });
     if (res.text) msg.text = res.text;
@@ -901,7 +901,7 @@ async function sendAi(q, { voice = false } = {}) {
     const fbs = (res.actions || []).filter(a => a.type === 'model_fallback'), fb = fbs[fbs.length - 1];
     if (fb) msg.note = `Answered by ${fb.label}${fbs.length === 1 ? ` · ${fbs[0].fromLabel || 'the first model'} ${fbs[0].reason === 'daily' ? 'reached its free daily limit (back at 10:00 Türkiye time)' : fbs[0].reason === 'slow' ? 'was too slow' : 'was busy'}` : ' · the faster models above it were busy or slow'}.`;
     msg.undo = (res.actions || []).filter(a => ['todo', 'expense', 'note'].includes(a.type) && a.id);
-    if ((res.actions || []).some(a => a.type === 'web_off')) { setSetting('aiWeb', false); msg.note = 'Google Search could not be used with this key, so it was switched off.'; }
+    if ((res.actions || []).some(a => a.type === 'web_off') && !setting('searchKey')) msg.note = 'For live web search, add the free Tavily key in Settings → Smart chat.';
     state.aiHistory = res.history || state.aiHistory;
     try { trackUsage(api.estimateCost(state.ai.model, res.usage || {}), res.usage); } catch {}
   } catch (e) {
@@ -1467,7 +1467,11 @@ function aiCardHtml() {
   return `<div class="card ai-card"><h3>${ico('sparkles')} Smart chat (free)</h3>
     <p class="sub">${a.on === false ? 'Off: the chat uses the built-in helper.' : `On: the chat uses Google ${AI_NAME} whenever you are online.`}</p>
     <label class="check" style="margin-top:10px"><input type="checkbox" id="aiOn" ${a.on !== false ? 'checked' : ''}> <span>Use the AI in the chat</span></label>
-    <label class="check" style="margin-top:6px"><input type="checkbox" id="aiWeb" ${a.web ? 'checked' : ''}> <span>Try Google Search for live questions (weather, news). Free keys often cannot use it; the app switches it off by itself if so.</span></label>
+    <div class="divider"></div><b>${ico('globe', 'sm')} Live search</b>
+    <p class="small" style="margin-top:4px">Weather is always live (free). ${setting('searchKey') ? 'Web search is on: opening hours, closures, news, prices (free Tavily key, 1,000 searches a month).' : 'For live web search (opening hours today, closures, news), add a free Tavily key:'}</p>
+    ${setting('searchKey') ? `<div class="btn-row" style="margin-top:8px"><button class="btn sm ghost danger" data-act="search-remove">${ico('trash', 'sm')} Remove search key</button></div>`
+      : `<ol class="steps small" style="margin-top:8px"><li>Open <a href="https://app.tavily.com" target="_blank" rel="noopener">app.tavily.com</a> and sign in with Google (free, no card).</li><li>Copy the API key (it starts with tvly-) and paste it here once.</li></ol>
+      <form id="searchForm" autocomplete="off" style="margin-top:8px"><input id="searchKey" type="password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="tvly-…" aria-label="Tavily key"><button class="btn primary wide" style="margin-top:8px">${ico('key', 'sm')} Save search key</button><p id="searchMsg" class="small" style="margin-top:6px"></p></form>`}
     ${(state.aiModels || []).length > 1 ? `<label style="display:block;margin-top:10px"><span class="field-label">Model</span><select id="aiModelSel">${modelOptions(a.model)}</select></label>` : ''}
     ${u ? `<p class="small" style="margin-top:8px">This phone: ${plural(u.calls, 'request')} since ${esc(dateLabel(String(u.since).slice(0, 10)))} · free</p>` : ''}
     <div class="btn-row" style="margin-top:10px"><button class="btn ghost" data-act="ai-test">${ico('check', 'sm')} Test</button><button class="btn ghost danger" data-act="ai-remove">${ico('trash', 'sm')} Remove key</button></div></div>`;
@@ -1622,6 +1626,11 @@ function wire() {
     if (e.target.id === 'todoForm') { e.preventDefault(); try { addUserTodo({ title: $('#tdTitle').value, due: $('#tdDue').value, time: $('#tdTime').value }); closeSheet(); render({ keepScroll: true }); toast('Added'); } catch (err) { toast(err.message); } return; }
     if (e.target.id === 'aiForm') { e.preventDefault(); aiConnect(); return; }
     if (e.target.id === 'ghForm') { e.preventDefault(); ghConnect(); return; }
+    if (e.target.id === 'searchForm') {
+      e.preventDefault(); const k = ($('#searchKey')?.value || '').trim();
+      if (!/^tvly-[\w-]{10,}$/.test(k)) { $('#searchMsg').textContent = 'That does not look like a Tavily key (it starts with tvly-).'; return; }
+      setSetting('searchKey', k); toast('Live web search is on ✓', 3000); render({ keepScroll: true }); return;
+    }
     if (e.target.id === 'expForm') {
       e.preventDefault();
       const amount = parseFloat($('#expAmt').value); if (!(amount > 0)) { toast('Enter an amount'); return; }
@@ -1662,6 +1671,7 @@ async function act(a, el) {
     case 'ai-toggle': if (state.ai) { setSetting('aiOn', state.ai.on === false); render({ keepScroll: true }); toast(state.ai.on ? (navigator.onLine === false ? `${AI_NAME} is on (when you are online)` : `${AI_NAME} is on`) : 'Built-in helper'); } break;
     case 'ai-test': { el.disabled = true; try { const api = await aiApi(); const r = await api.testKey({ apiKey: state.ai.key, model: state.ai.model }); toast(r.ok ? `${AI_NAME} answered ✓` : r.message, 4000); } catch (err) { toast('Could not reach the AI', 3500); } el.disabled = false; break; }
     case 'ai-remove': if (confirm('Remove the AI key from every phone?')) { setSetting('aiKey', null); state.aiHistory = []; render({ keepScroll: true }); toast('Key removed'); } break;
+    case 'search-remove': if (confirm('Remove the web search key from every phone?')) { setSetting('searchKey', null); render({ keepScroll: true }); toast('Search key removed'); } break;
     case 'sync-now': { el.disabled = true; await syncNow(); el.disabled = false; toast(state.sync?.s === 'ok' ? 'Synced ✓' : (state.sync?.msg || 'Not synced'), 3000); break; }
     case 'gh-remove': if (confirm('Remove the GitHub token from every phone? Cloud saving stops until a token is added again. (To be safe, also delete the token on github.com.)')) {
       state.tokenTry = setting('ghToken'); setSetting('ghToken', null); try { await syncNow(); } finally { state.tokenTry = null; } render({ keepScroll: true }); toast('Token removed'); } break;

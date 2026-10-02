@@ -520,14 +520,17 @@ export const TOOL_DEFS = [
   fn('list_documents', 'Lists every document the user added with how each one is filed (kind, title, date, day, trip, reference). app_state already '
     + 'lists up to 30; call this only when you need the full list.'),
 ];
-export const WEB_TOOL = fn('web_search', 'Searches Google for live information and returns a short answer with its sources. Use it only for things that change '
+export const WEB_TOOL = fn('web_search', 'Searches the web for live information and returns a short answer with its sources. Use it only for things that change '
   + '(weather, today\'s opening hours or closures, strikes, ferry disruptions, events, exchange rates, news), never for what TRIP DATA already answers. '
   + 'Search for one question at a time.', { query: str('A short, specific search query in English, e.g. "Istanbul weather 17 October" or "Topkapı Palace opening hours today".') }, ['query']);
-const SCHEMA = Object.fromEntries([...TOOL_DEFS, WEB_TOOL].map((t) => [t.name, t.parametersJsonSchema || { type: 'object', properties: {} }]));
+export const WEATHER_TOOL = fn('weather', 'Live weather from Open-Meteo: the forecast for a place and day (up to 16 days ahead) or right now. Use it for every weather, rain, '
+  + 'temperature, wind or "what to wear" question instead of web_search.', { place: str('City or area, e.g. "Istanbul", "Antalya", "Sarıyer".'),
+  date: str('YYYY-MM-DD, or "now".') }, ['place', 'date']);
+const SCHEMA = Object.fromEntries([...TOOL_DEFS, WEB_TOOL, WEATHER_TOOL].map((t) => [t.name, t.parametersJsonSchema || { type: 'object', properties: {} }]));
 const ACTION = { add_todo: 'todo', add_expense: 'expense', add_day_note: 'note', update_document: 'doc' };
 const STATUS = { get_day: 'reading your day', search_trip: 'checking the trip plan', create_pdf: 'making the PDF', add_expense: 'logging the expense',
   add_todo: 'adding a to-do', add_day_note: 'saving a note', update_document: 'updating the document', read_document: 'reading your document',
-  list_documents: 'checking your documents', web_search: 'searching Google' };
+  list_documents: 'checking your documents', web_search: 'searching the web', weather: 'checking the weather' };
 
 /* tolerant JSON-schema check for the subset the tool schemas use (optional fields may be null) */
 function check(s, v, p = 'input') {
@@ -579,9 +582,55 @@ const isAbort = (e, signal) => e?.name === 'AbortError' || !!signal?.aborted;
 const searchOff = new Set();   // search models that are not available to this key (learned this session)
 const SEARCH_SYS = (today) => `Answer the question with Google Search, for tourists in Türkiye${isIso(today) ? ` (today is ${dl(today)} ${today.slice(0, 4)}, Türkiye time UTC+3)` : ''}. `
   + 'Be brief and factual: at most 120 words, with the exact dates, times, prices or opening hours you found and the name of each source.';
+// live weather: Open-Meteo (free, no key); trip cities are known, other places are looked up by name
+const WMO = { 0: 'clear sky', 1: 'mainly clear', 2: 'partly cloudy', 3: 'overcast', 45: 'fog', 48: 'fog', 51: 'light drizzle', 53: 'drizzle', 55: 'heavy drizzle',
+  61: 'light rain', 63: 'rain', 65: 'heavy rain', 66: 'freezing rain', 67: 'freezing rain', 71: 'light snow', 73: 'snow', 75: 'heavy snow', 80: 'rain showers',
+  81: 'rain showers', 82: 'violent rain showers', 95: 'thunderstorm', 96: 'thunderstorm with hail', 99: 'thunderstorm with hail' };
+const PLACES = { istanbul: [41.0138, 28.9497], antalya: [36.8969, 30.7133], lara: [36.8580, 30.8240], 'abu dhabi': [24.4539, 54.3773], dubai: [25.2048, 55.2708] };
+async function weatherNow({ place, date }, ctx) {
+  const name = S(place) || 'Istanbul', key = norm(name);
+  let ll = Object.entries(PLACES).find(([k]) => key.includes(k))?.[1];
+  if (!ll) {
+    const g = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&name=${encodeURIComponent(name)}`, { signal: ctx.signal }).then((r) => r.json()).catch(() => null);
+    const hit = g?.results?.[0]; if (hit) ll = [hit.latitude, hit.longitude];
+  }
+  if (!ll) ll = PLACES.istanbul;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${ll[0]}&longitude=${ll[1]}&timezone=Europe%2FIstanbul&forecast_days=16`
+    + '&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation'
+    + '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_speed_10m_max,sunset';
+  const j = await fetch(url, { signal: ctx.signal }).then((r) => r.ok ? r.json() : null).catch(() => null);
+  if (!j?.daily) throw err('network', 'The weather service could not be reached. Say so and give the usual October weather instead.');
+  const d = j.daily, i = isIso(date) ? d.time.indexOf(date) : 0;
+  const day = (k) => ({ date: d.time[k], sky: WMO[d.weather_code[k]] || 'mixed', max: Math.round(d.temperature_2m_max[k]), min: Math.round(d.temperature_2m_min[k]),
+    rainChance: d.precipitation_probability_max?.[k] ?? null, rainMm: d.precipitation_sum?.[k] ?? null, windKmh: Math.round(d.wind_speed_10m_max[k]) });
+  ctx.out.cites.set('https://open-meteo.com/', { title: 'Open-Meteo weather', url: 'https://open-meteo.com/' });
+  const now = j.current ? { temp: Math.round(j.current.temperature_2m), feels: Math.round(j.current.apparent_temperature), sky: WMO[j.current.weather_code] || 'mixed', windKmh: Math.round(j.current.wind_speed_10m) } : null;
+  if (isIso(date) && i < 0) return { place: name, note: `${date} is more than 16 days ahead, so there is no forecast yet: give the usual mid-October weather and say the forecast appears about 2 weeks before.`, now };
+  return { place: name, now, forecast: [day(i < 0 ? 0 : i), ...(i >= 0 && i + 1 < d.time.length ? [day(i + 1)] : [])] };
+}
+// free web search: Tavily (1,000 searches a month, no card) with the user's own key; only the query leaves the phone
+async function tavily(q, ctx) {
+  const news = /(today|tonight|now|strike|closed|closure|cancel|delay|news|event|protest|weather)/i.test(q);
+  let r;
+  try {
+    r = await fetch('https://api.tavily.com/search', { method: 'POST', signal: ctx.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ctx.searchKey}` },
+      body: JSON.stringify({ query: q, search_depth: 'basic', include_answer: true, max_results: 5, topic: news ? 'news' : 'general', ...(news ? { days: 7 } : {}) }) });
+  } catch (e) { if (isAbort(e, ctx.signal)) throw e; throw err('network', 'The web search could not be reached. Answer from TRIP DATA and say live information could not be checked.'); }
+  if (r.status === 401 || r.status === 403) throw err('other', 'The Tavily search key is not accepted. Tell the user to check it in Settings → Smart chat. Answer from TRIP DATA meanwhile.');
+  if (r.status === 429 || r.status === 432 || r.status === 433) throw err('rate', 'The free monthly web searches are used up (Tavily resets them monthly). Answer from TRIP DATA and say so.');
+  if (!r.ok) throw err('other', `The web search failed (${r.status}). Answer from TRIP DATA and say live information could not be checked.`);
+  const j = await r.json().catch(() => ({}));
+  const sources = (j.results || []).filter((x) => /^https:\/\//.test(x.url || '')).slice(0, 5).map((x) => ({ title: S(x.title) || 'source', url: x.url, text: cut(x.content, 400) }));
+  ctx.usage.webSearches += 1;
+  for (const x of sources) if (!ctx.out.cites.has(x.url)) ctx.out.cites.set(x.url, { title: x.title, url: x.url });
+  const answer = S(j.answer) || sources.map((x) => `${x.title}: ${x.text}`).join('\n');
+  if (!answer) throw err('other', 'The web search found nothing useful for that.');
+  return { answer: answer.slice(0, 2500), sources: sources.map(({ title, url, text }) => ({ title, url, snippet: text })) };
+}
 async function webSearch(query, ctx) {
   const q = privacy(S(query), ctx.C).slice(0, 300);
   if (!q) throw err('other', 'The search query was empty.');
+  if (ctx.searchKey) return tavily(q, ctx);
   let busy = false, usedUp = false;
   for (const id of SEARCH_MODELS) {
     if (searchOff.has(id)) continue;
@@ -611,7 +660,7 @@ async function webSearch(query, ctx) {
   }
   if (usedUp) throw err('rate', 'The free Google Search allowance for today is used up (it resets at 10:00 Türkiye time). Answer from TRIP DATA and what you know, and say that live information could not be checked today.');
   if (busy) throw err('rate', 'Google Search is busy right now. Answer from TRIP DATA and what you know, and say that live information could not be checked just now.');
-  throw Object.assign(err('other', 'Google Search is not available with this free key (Google offers it only with billing). Answer from TRIP DATA and what you know, say that live information could not be checked, and say where they can check it.'), { webOff: true });
+  throw Object.assign(err('other', 'Live web search needs the free Tavily key: tell the user to add it in Settings → Smart chat (tavily.com, free, no card). Google Search is not available with this free key (Google offers it only with billing). Answer from TRIP DATA and what you know, say that live information could not be checked, and say where they can check it.'), { webOff: true });
 }
 
 async function runCall(part, ctx) {
@@ -625,6 +674,7 @@ async function runCall(part, ctx) {
   if (bad) return fail(JSON.stringify({ INVALID_INPUT: bad }));
   try {
     if (name === 'web_search') return ok(await webSearch(input.query, ctx));
+    if (name === 'weather') return ok(await weatherNow(input, ctx));
     if (name === 'create_pdf') {
       const spec = pdfSpecFrom(input);
       if (!spec.blocks.length) return fail('The PDF has no content blocks. Add headings, paragraphs, bullets or tables.');
@@ -765,7 +815,7 @@ const EMPTY = 'Sorry, Gemini returned an empty answer. Please ask again.';
 function chatBody(M, sys, contents, web, mode) {
   return {
     systemInstruction: { parts: [{ text: sys }] }, contents,
-    tools: [{ functionDeclarations: web ? [...TOOL_DEFS, WEB_TOOL] : TOOL_DEFS }],
+    tools: [{ functionDeclarations: web ? [...TOOL_DEFS, WEB_TOOL, WEATHER_TOOL] : [...TOOL_DEFS, WEATHER_TOOL] }],
     toolConfig: { functionCallingConfig: { mode } },
     generationConfig: { maxOutputTokens: 16384, thinkingConfig: { thinkingLevel: M.think } },
     store: false,
@@ -773,7 +823,7 @@ function chatBody(M, sys, contents, web, mode) {
 }
 
 /* ───────────── one chat turn: streaming + function-calling loop ───────────── */
-export async function chatTurn({ apiKey, model, webSearch = false, history = [], user = {}, content, live = {}, handlers = {},
+export async function chatTurn({ apiKey, model, webSearch = false, searchKey = null, history = [], user = {}, content, live = {}, handlers = {},
   onText = () => {}, onStatus = () => {}, signal } = {}) {
   const key = S(apiKey);
   if (!key) throw tag(err('auth', 'Add your free Google AI Studio key in Settings first.'), 'chat');
@@ -787,7 +837,7 @@ export async function chatTurn({ apiKey, model, webSearch = false, history = [],
   const out = { actions: [], pdfs: [], cites: new Map(), suggestions: [] }, usage = newUsage(), origin = new Map(), webTurns = new Set();
   const st = { ...choose(model), switched: false, actions: out.actions };
   if (st.M !== st.from) out.actions.push(fallbackAction(st.M, st.from, 'daily'));
-  const ctx = { apiKey: key, handlers, out, C, signal, usage, web: !!webSearch, today: nowOf(live).today };
+  const ctx = { apiKey: key, handlers, out, C, signal, usage, web: !!webSearch, searchKey: S(searchKey) || null, today: nowOf(live).today };
   let text = '', fresh = false, shown = false, refused = false, finish = null, mode = 'AUTO', retried = false;
   const emit = (t) => { if (!t) return; if (fresh && text) { text += '\n\n'; onText('\n\n'); } fresh = false; shown = true; text += t; onText(t); };
   const onPart = (p) => {
