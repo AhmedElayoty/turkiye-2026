@@ -441,6 +441,7 @@ export function answer(raw, ctx) {
   if (/^(show( me)?|open|where is|where are|my|our)?\s*(the\s)?(ticket|tickets|e-ticket|تذكره|تذاكر)$/.test(q)) intent = 'mydocs';
   if (/(^|\s)(left|remaining|remain|rest of|باقي|متبقي|المتبقي|يتبقي|ba2i|baqi)(\s|$)/.test(q) && !sc.countdown && (sc.money || sc.spent || /(money|budget|cash|aed|lira|فلوس|ميزانيه)/.test(q))) intent = 'left';
   if (intent === 'money' && date && !/(budget|whole|total trip|10k|10000|under 10)/.test(q)) intent = 'daycost';
+  if (/(to[\s-]?dos?|checklist|tasks?|مهام)/.test(low) && /(today|tonight|اليوم)/.test(low)) intent = 'todo';   // "my to-dos for today" (raw words: typo fixing may change "dos")
   if (intent === 'tips' && /(sunset|غروب)/.test(q) && (date || ctx.todayInTrip)) { date = date || ctx.todayInTrip; intent = 'sunset'; }
   if (/(^|\s)(lost|lose|losing|stolen|missing|ضاع|ضاعت|ضيعنا|ضيعت|فقدنا)(\s|$)/.test(q) && /(istanbulkart|kart|transport card|travel card|metro card|كرت|بطاقه)/.test(q) && sc.transport) intent = 'transport';
   // a user document named by its title, place or reference
@@ -1187,6 +1188,15 @@ function todoAnswer(ctx, q = '') {
   const namedAll = all.filter(t => words.some(w => norm(`${t.title} ${t.note || ''}`).includes(w)));
   if (/(^|\s)(book|reserve|reservations?|booking)(\s|$)/.test(q)) { open = open.filter(t => t.kind === 'book'); scope = 'Bookings to make'; }
   else if (/before (we )?(fly|flying|leave|leaving|the trip|departure|travel)/.test(q)) { const lim = C.meta.tripStart || C.days[0].date; open = open.filter(t => t.due <= lim); scope = 'Before you fly'; }
+  else if (/(^|\s)(today|tonight|now|اليوم|الحين|هلا|النهارده)(\s|$)/.test(q)) {
+    // "today" means what is due today (and anything overdue or still possible now), then the next one coming
+    const now = open.filter(t => t.due <= ctx.today && ['now', 'overdue', 'soon'].includes(t.st)), next = open.find(t => t.due > ctx.today);
+    const blocks = now.length ? [TABLE(['Due', 'What', 'Note'], now.map(t => [(t.due === ctx.today ? 'Today' : dateLabel(t.due)) + (t.time ? ' ' + t.time : ''), t.title, tNote(t, ctx, t.st)]), { columns: { 0: { cellWidth: 26 } } })]
+      : [CALL(`Nothing is due today (${dateLabel(ctx.today)}).`, 'ok')];
+    if (next) blocks.push(P(`Next: ${next.title} · ${dateLabel(next.due)}${next.time ? ' ' + next.time : ''}.`));
+    return { title: now.length ? `To do today · ${now.length}` : 'Nothing due today', blocks,
+             actions: [{ act: 'tab', tab: 'todos', label: 'Open the checklist', icon: 'calcheck' }], suggestions: ['To-do list', 'Plan for today'] };
+  }
   else if (namedAll.length && namedAll.length < C.todos.length / 2) {
     // a specific to-do (visa, eSIM, deposit, check-in…): say whether it is done
     const tone = { done: 'ok', missed: 'sea', overdue: 'red', now: 'red' };

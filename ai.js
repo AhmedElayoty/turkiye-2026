@@ -3,11 +3,11 @@
 
 /* free-tier models (Google AI Studio key without billing); `lighter` = where a 429 sends the turn */
 export const MODELS = [
-  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', note: 'Smartest (default). Small free daily limit, then Flash-Lite answers', think: 'MEDIUM', lighter: 'gemini-3.5-flash-lite' },
-  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', note: 'Smart and a little quicker', think: 'MEDIUM', lighter: 'gemini-3.5-flash-lite' },
-  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', note: 'Fastest, the most free requests per day', think: 'LOW', lighter: 'gemini-3.1-flash-lite' },
+  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', note: 'Best (tried first); if it is busy or slow the next one answers', think: 'MEDIUM', lighter: 'gemini-3.5-flash', first: 10000 },
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', note: 'Start one step lower', think: 'MEDIUM', lighter: 'gemini-3.5-flash-lite', first: 8000 },
+  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', note: 'Fastest, the most free requests per day', think: 'LOW', lighter: 'gemini-3.1-flash-lite', first: 25000 },
 ];
-const BACKUP = { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', think: 'LOW' };
+const BACKUP = { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', think: 'LOW', first: 0 };
 const ALL = [...MODELS, BACKUP];
 export const DEFAULT_MODEL = 'gemini-3.8-flash';
 /* Google Search on the free tier exists only on the 2.5 models (Gemini 3: "Not available"), and cannot be combined with
@@ -168,8 +168,23 @@ function takeChunk(out, j, onPart) {
 }
 const newResult = () => ({ parts: [], finishReason: null, usage: null, blockReason: null, grounding: null });
 
-async function streamCall(apiKey, model, body, signal, onPart) {
-  const res = await http(apiKey, `models/${model}:streamGenerateContent?alt=sse`, { body, signal });
+// one attempt on one model: the user's Stop still works, and a model that has not answered by the deadline is given up
+function attempt(signal, ms) {
+  const ctl = new AbortController(); let slow = false;
+  const stop = () => ctl.abort();
+  if (signal) { if (signal.aborted) ctl.abort(); else signal.addEventListener('abort', stop, { once: true }); }
+  const t = ms ? setTimeout(() => { slow = true; ctl.abort(); }, ms) : null;
+  return { signal: ctl.signal, got: () => clearTimeout(t), done: () => { clearTimeout(t); signal?.removeEventListener?.('abort', stop); }, slow: () => slow && !signal?.aborted };
+}
+const slowErr = (model) => Object.assign(new Error(`${model} did not answer in time`), { name: 'GeminiError', status: 504, gstatus: 'DEADLINE', slow: true });
+async function streamCall(apiKey, model, body, signal, onPart, firstMs = 0) {
+  const a = attempt(signal, firstMs);
+  try { return await streamOnce(apiKey, model, body, a, onPart); }
+  catch (e) { if (a.slow()) throw slowErr(model); throw e; }
+  finally { a.done(); }
+}
+async function streamOnce(apiKey, model, body, a, onPart) {
+  const res = await http(apiKey, `models/${model}:streamGenerateContent?alt=sse`, { body, signal: a.signal });
   const out = newResult(), reader = res.body.getReader(), dec = new TextDecoder();
   let buf = '', data = [];
   const line = (l) => {
@@ -180,6 +195,7 @@ async function streamCall(apiKey, model, body, signal, onPart) {
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
+      a.got();                                                          // it started answering: no deadline any more
       buf += dec.decode(value, { stream: true });
       for (let i = buf.search(/[\r\n]/); i >= 0; i = buf.search(/[\r\n]/)) {
         if (buf[i] === '\r' && i === buf.length - 1) break;            // a '\n' may follow in the next chunk
@@ -193,14 +209,16 @@ async function streamCall(apiKey, model, body, signal, onPart) {
   } catch (e) { try { await reader.cancel(); } catch {} throw e; }
   return out;
 }
-async function oneCall(apiKey, model, body, signal) {
-  const out = newResult();
-  takeChunk(out, await getJson(apiKey, `models/${model}:generateContent`, { body, signal }));
+async function oneCall(apiKey, model, body, signal, ms = 0) {
+  const out = newResult(), a = attempt(signal, ms);
+  try { takeChunk(out, await getJson(apiKey, `models/${model}:generateContent`, { body, signal: a.signal })); }
+  catch (e) { if (a.slow()) throw slowErr(model); throw e; }
+  finally { a.done(); }
   return out;
 }
 
 /* ───────────── free quota: 429 → the lighter model, remembered until the quota resets ───────────── */
-const tired = new Map();
+const tired = new Map((() => { try { return typeof localStorage !== 'undefined' ? JSON.parse(localStorage.getItem('tr26.ai_tired') || '[]') : []; } catch { return []; } })());
 const isTired = (id) => (tired.get(id) || 0) > Date.now();
 function pacificReset() {   // RPD quotas reset at midnight Pacific time
   try {
@@ -208,24 +226,32 @@ function pacificReset() {   // RPD quotas reset at midnight Pacific time
     return Date.now() + (86400 - ((p.hour % 24) * 3600 + p.minute * 60 + p.second)) * 1000;
   } catch { return Date.now() + 3600e3; }
 }
-const rest = (id, e) => tired.set(id, isDaily(e) ? pacificReset() : Date.now() + Math.max(20, e?.retryAfter || 0) * 1000);
+const rest = (id, e) => {
+  tired.set(id, isDaily(e) ? pacificReset() : e?.status === 429 ? Date.now() + Math.max(20, e?.retryAfter || 0) * 1000 : Date.now() + 10 * 60 * 1000);
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem('tr26.ai_tired', JSON.stringify([...tired].filter(([, t]) => t > Date.now()))); } catch {}
+};
 function choose(id) {
   const from = pick(id);
   let M = from;
   while (isTired(M.id) && M.lighter) M = pick(M.lighter);
   return { M, from };
 }
-const fallbackAction = (to, from, reason) => ({ type: 'model_fallback', model: to.id, label: to.label, from: from.id, reason });
+const fallbackAction = (to, from, reason) => ({ type: 'model_fallback', model: to.id, label: to.label, from: from.id, fromLabel: from.label, reason });
+export const _resetModels = () => tired.clear();   // tests only
+const switchable = (e) => !!e && !e.aborted && e.name !== 'AbortError' && (e.status === 429 || e.status >= 500 || e.status === 404);
 /* runs fn(model); on a 429 retries ONCE on the lighter free model (only if nothing was shown yet) */
+// best model first; if it is busy, slow, out of free requests or missing, the next lighter one answers (and so on)
 async function withFallback(st, fn, canSwitch = () => true) {
-  try { return await fn(st.M); } catch (e) {
-    if (e?.status !== 429) throw e;
-    rest(st.M.id, e);
-    if (st.switched || !st.M.lighter || !canSwitch()) throw e;
-    const to = pick(st.M.lighter);
-    st.actions.push(fallbackAction(to, st.M, isDaily(e) ? 'daily' : 'busy'));
-    st.switched = true; st.M = to;
-    try { return await fn(st.M); } catch (e2) { if (e2?.status === 429) rest(st.M.id, e2); throw e2; }
+  for (;;) {
+    try { return await fn(st.M); } catch (e) {
+      if (!switchable(e)) throw e;
+      rest(st.M.id, e);
+      let to = st.M.lighter ? pick(st.M.lighter) : null;
+      while (to && isTired(to.id) && to.lighter) to = pick(to.lighter);
+      if (!to || to.id === st.M.id || !canSwitch()) throw e;
+      st.actions.push(fallbackAction(to, st.M, e.status === 429 && isDaily(e) ? 'daily' : e.slow ? 'slow' : 'busy'));
+      st.switched = true; st.M = to;
+    }
   }
 }
 
@@ -771,7 +797,7 @@ export async function chatTurn({ apiKey, model, webSearch = false, history = [],
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
       fresh = true; shown = false; onStatus('thinking');
       const m = round === MAX_TOOL_ROUNDS ? 'NONE' : mode;   // tool budget used up: answer with what you have
-      const r = await withFallback(st, (M) => streamCall(key, M.id, chatBody(M, sys, forModel(contents, start, M.id, origin), ctx.web, m), signal, onPart), () => !shown);
+      const r = await withFallback(st, (M) => streamCall(key, M.id, chatBody(M, sys, forModel(contents, start, M.id, origin), ctx.web, m), signal, onPart, M.first), () => !shown);
       addUsage(usage, r.usage);
       finish = r.finishReason;
       const parts = r.parts, calls = parts.filter((p) => p.functionCall);
@@ -971,7 +997,7 @@ export async function classifyDocument({ apiKey, model, file, content, today = n
         ...(legacy ? { responseMimeType: 'application/json', responseJsonSchema: schema } : { responseFormat: { text: { mimeType: 'application/json', schema } } }) },
       store: false,
     });
-    const run = (M) => oneCall(key, M.id, body(), signal);
+    const run = (M) => oneCall(key, M.id, body(), signal, M.first ? M.first * 3 : 0);
     let r;
     try { r = await withFallback(st, run); } catch (e) {
       if (!(e?.status === 400 && /response_?format|mime_?type|unknown name|schema/i.test(apiMsg(e)))) throw e;
@@ -1003,7 +1029,7 @@ export async function transcribe({ apiKey, model = null, audio = {}, signal } = 
     const st = { ...choose(model && /lite/.test(model) ? model : light?.id || model), switched: false, actions: [] };
     const body = { contents: [{ role: 'user', parts: [{ inlineData: { mimeType: AUDIO.test(audio.mime || '') ? audio.mime : 'audio/wav', data: base64 } }, { text: TRANSCRIBE }] }],
       generationConfig: { maxOutputTokens: 2048, temperature: 0 }, store: false };
-    const r = await withFallback(st, (M) => oneCall(key, M.id, body, signal));
+    const r = await withFallback(st, (M) => oneCall(key, M.id, body, signal, M.first ? M.first * 2 : 0));
     if (r.blockReason || REFUSE.test(r.finishReason || '')) throw err('refused');
     const text = r.parts.filter((p) => typeof p.text === 'string' && !p.thought).map((p) => p.text).join('').trim().replace(/^["“']+|["”']+$/g, '');
     return { text: /^\(?(no speech|silence|nothing|no words)[^)]*\)?\.?$/i.test(text) ? '' : text, model: st.M.id, ...(st.actions.length ? { actions: st.actions } : {}) };

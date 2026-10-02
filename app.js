@@ -871,8 +871,9 @@ async function sendAi(q, { voice = false } = {}) {
     msg.pdfs = (res.pdfs || []).map(p => ({ ...p, filename: /\.pdf$/i.test(p.filename || '') ? p.filename : `Turkiye-2026-${slug(p.title)}.pdf` }));
     msg.citations = res.citations || [];
     msg.sugg = (res.searchSuggestions || []).slice(0, 5).map(x => x.html).filter(Boolean);
-    const fb = (res.actions || []).find(a => a.type === 'model_fallback');
-    if (fb) msg.note = `Answered by ${fb.label}: ${fb.reason === 'daily' ? 'the free daily allowance of the main model is used up until 10:00 Türkiye time' : 'the main model is busy right now'}.`;
+    // which model answered when the best one could not (busy, slow or out of free requests)
+    const fbs = (res.actions || []).filter(a => a.type === 'model_fallback'), fb = fbs[fbs.length - 1];
+    if (fb) msg.note = `Answered by ${fb.label}${fbs.length === 1 ? ` · ${fbs[0].fromLabel || 'the first model'} ${fbs[0].reason === 'daily' ? 'reached its free daily limit (back at 10:00 Türkiye time)' : fbs[0].reason === 'slow' ? 'was too slow' : 'was busy'}` : ' · the faster models above it were busy or slow'}.`;
     msg.undo = (res.actions || []).filter(a => ['todo', 'expense', 'note'].includes(a.type) && a.id);
     if ((res.actions || []).some(a => a.type === 'web_off')) { setSetting('aiWeb', false); msg.note = 'Google Search could not be used with this key, so it was switched off.'; }
     state.aiHistory = res.history || state.aiHistory;
