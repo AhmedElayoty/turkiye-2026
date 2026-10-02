@@ -1,5 +1,5 @@
 /* Türkiye 2026 · service worker. VERSION and ASSETS are stamped by build/build_v2.py. */
-const VERSION = '20261002-210602';
+const VERSION = '20261002-215438';
 const ASSETS = [
  "./",
  "./index.html",
@@ -121,14 +121,18 @@ async function cacheFirst(req) {
 }
 
 async function takeShare(req) {
+  let dest = './#docs';
   try {
     const fd = await req.formData();
     const files = fd.getAll('files').filter(f => f && typeof f.arrayBuffer === 'function' && f.size > 0).slice(0, 5);
     const items = await Promise.all(files.map(async f => ({ name: f.name || 'shared', type: f.type || '', bytes: new Uint8Array(await f.arrayBuffer()) })));
+    // a shared place or link (Google Maps: name, address and link) goes to the chat
+    const said = ['title', 'text', 'url'].map(k => String(fd.get(k) || '').trim()).filter((v, i, a) => v && a.indexOf(v) === i).join(String.fromCharCode(10)).slice(0, 2000);
+    if (said && !items.length) { items.push({ kind: 'text', text: said }); dest = './#ask'; }
     const db = await new Promise((res, rej) => { const r = indexedDB.open('tr26', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
     await new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(items, 'inbox'); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
   } catch (_) { /* nothing to keep: the app simply opens */ }
-  return Response.redirect(new URL('./#docs', self.registration.scope).href, 303);
+  return Response.redirect(new URL(dest, self.registration.scope).href, 303);
 }
 
 self.addEventListener('message', (e) => { if (e.data === 'skipWaiting') self.skipWaiting(); });

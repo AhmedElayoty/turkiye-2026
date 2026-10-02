@@ -226,8 +226,11 @@ function pacificReset() {   // RPD quotas reset at midnight Pacific time
     return Date.now() + (86400 - ((p.hour % 24) * 3600 + p.minute * 60 + p.second)) * 1000;
   } catch { return Date.now() + 3600e3; }
 }
+const soon = new Map();   // per-minute limits: when Google says that model can be asked again
 const rest = (id, e) => {
-  tired.set(id, isDaily(e) ? pacificReset() : e?.status === 429 ? Date.now() + Math.max(20, e?.retryAfter || 0) * 1000 : Date.now() + 10 * 60 * 1000);
+  if (e?.status === 429 && !isDaily(e)) soon.set(id, Date.now() + Math.max(3, e.retryAfter || 20) * 1000);
+  else if (e?.status >= 500 && !e?.slow) soon.set(id, Date.now() + 5000);   // "high demand": usually gone in seconds
+  tired.set(id,isDaily(e) ? pacificReset() : e?.status === 429 ? Date.now() + Math.max(20, e?.retryAfter || 0) * 1000 : Date.now() + 10 * 60 * 1000);
   try { if (typeof localStorage !== 'undefined') localStorage.setItem('tr26.ai_tired', JSON.stringify([...tired].filter(([, t]) => t > Date.now()))); } catch {}
 };
 function choose(id) {
@@ -237,10 +240,14 @@ function choose(id) {
   return { M, from };
 }
 const fallbackAction = (to, from, reason) => ({ type: 'model_fallback', model: to.id, label: to.label, from: from.id, fromLabel: from.label, reason });
-export const _resetModels = () => tired.clear();   // tests only
+export const _resetModels = () => { tired.clear(); soon.clear(); };   // tests only
 const switchable = (e) => !!e && !e.aborted && e.name !== 'AbortError' && (e.status === 429 || e.status >= 500 || e.status === 404);
 /* runs fn(model); on a 429 retries ONCE on the lighter free model (only if nothing was shown yet) */
 // best model first; if it is busy, slow, out of free requests or missing, the next lighter one answers (and so on)
+const sleep = (ms, signal) => new Promise((res, rej) => {
+  const t = setTimeout(res, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(t); rej(Object.assign(new Error('Aborted'), { name: 'AbortError' })); }, { once: true });
+});
 async function withFallback(st, fn, canSwitch = () => true) {
   for (;;) {
     try { return await fn(st.M); } catch (e) {
@@ -248,7 +255,20 @@ async function withFallback(st, fn, canSwitch = () => true) {
       rest(st.M.id, e);
       let to = st.M.lighter ? pick(st.M.lighter) : null;
       while (to && isTired(to.id) && to.lighter) to = pick(to.lighter);
-      if (!to || to.id === st.M.id || !canSwitch()) throw e;
+      if (!to || to.id === st.M.id || !canSwitch()) {
+        // every model hit the free per-MINUTE limit (not the daily one) or is overloaded: wait the few seconds Google asks for and try once more
+        if (st.onWait && !st.waited && ((e.status === 429 && !isDaily(e)) || (e.status >= 500 && !e.slow)) && canSwitch()) {
+          const chain = []; for (let m = st.from; m && !chain.includes(m); m = m.lighter ? pick(m.lighter) : null) chain.push(m);
+          const next = chain.filter((m) => soon.has(m.id) && soon.get(m.id) - Date.now() <= 120000).sort((a, b) => soon.get(a.id) - soon.get(b.id))[0];
+          const ms = next ? Math.max(3000, soon.get(next.id) - Date.now()) : Infinity;
+          if (next && ms <= 45000) {
+            st.waited = true; st.onWait(Math.ceil(ms / 1000));
+            await sleep(ms, st.signal);
+            tired.delete(next.id); st.M = next; continue;
+          }
+        }
+        throw e;
+      }
       st.actions.push(fallbackAction(to, st.M, e.status === 429 && isDaily(e) ? 'daily' : e.slow ? 'slow' : 'busy'));
       st.switched = true; st.M = to;
     }
@@ -523,7 +543,9 @@ export const TOOL_DEFS = [
     + 'where it is, how far it is from the hotel, and which remaining trip day passes nearest to it: the stop to go after, the stop before, and the extra '
     + 'travel time. It prefers planned days that pass near the place and returns a free day only when nothing planned is near. Call it whenever they ask '
     + 'where a place is, whether or when they can visit it, or to fit or add it, unless TRIP DATA already plans it.',
-    { place: str('The place as they named it, e.g. "Rahmi Koç Museum" or "Emirgan Park".'), city: str('"Istanbul" or "Antalya" when known.') }, ['place']),
+    { place: str('The place as they named it, e.g. "Rahmi Koç Museum" or "Emirgan Park".'), city: str('"Istanbul" or "Antalya" when known.'),
+      address: str('Its street address or a Google Maps link / coordinates, when they gave one or a web search found it (shops and cafés are often not on the free map by name), '
+        + 'e.g. "Şair Nigar Sk. 18/A, Şişli, İstanbul".') }, ['place']),
   fn('add_optional_stop', 'Adds a place to one trip day as an OPTIONAL stop. The app shows it on that day, after the given stop, marked "Optional · as per '
     + 'chat", with a map button. Call it ONLY after they said yes to adding that place (ask first), using the date and afterTrip from place_fit.',
     {
@@ -537,7 +559,9 @@ export const TOOL_DEFS = [
 ];
 export const WEB_TOOL = fn('web_search', 'Searches the web for live information and returns a short answer with its sources. Use it only for things that change '
   + '(weather, today\'s opening hours or closures, strikes, ferry disruptions, events, exchange rates, news), never for what TRIP DATA already answers. '
-  + 'Search for one question at a time.', { query: str('A short, specific search query in English, e.g. "Istanbul weather 17 October" or "Topkapı Palace opening hours today".') }, ['query']);
+  + 'Search for one question at a time.', { query: str('A short, specific search query in English, e.g. "Rahmi Koç Museum opening hours" or "Istanbul ferry strike". '
+  + 'For opening hours and closed days do not add dates or "today": the places\' own pages answer that.'),
+  site: str('Optional: search only this website, e.g. the official site place_fit found ("miniaturk.com.tr"). If it has nothing, the whole web is searched.') }, ['query']);
 export const WEATHER_TOOL = fn('weather', 'Live weather from Open-Meteo: the forecast for a place and day (up to 16 days ahead) or right now. Use it for every weather, rain, '
   + 'temperature, wind or "what to wear" question instead of web_search.', { place: str('City or area, e.g. "Istanbul", "Antalya", "Sarıyer".'),
   date: str('YYYY-MM-DD, or "now".') }, ['place', 'date']);
@@ -625,28 +649,40 @@ async function weatherNow({ place, date }, ctx) {
   return { place: name, now, forecast: [day(i < 0 ? 0 : i), ...(i >= 0 && i + 1 < d.time.length ? [day(i + 1)] : [])] };
 }
 // free web search: Tavily (1,000 searches a month, no card) with the user's own key; only the query leaves the phone
-async function tavily(q, ctx) {
-  const news = /(today|tonight|now|strike|closed|closure|cancel|delay|news|event|protest|weather)/i.test(q);
+const siteOf = (s) => { const m = /^(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?:[/:?#]|$)/i.exec(S(s)); return m ? m[1].toLowerCase() : null; };
+async function tavily(q, ctx, site = null) {
+  // the news index (last 7 days) only for live disruptions; opening hours, closed days and prices come from the places' own pages
+  const news = !site && /(strike|protest|cancel|delay|disruption|news|accident|earthquake|storm|flood|traffic jam)/i.test(q);
   let r;
   try {
     r = await fetch('https://api.tavily.com/search', { method: 'POST', signal: ctx.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ctx.searchKey}` },
-      body: JSON.stringify({ query: q, search_depth: 'basic', include_answer: true, max_results: 5, topic: news ? 'news' : 'general', ...(news ? { days: 7 } : {}) }) });
+      body: JSON.stringify({ query: q, search_depth: 'basic', include_answer: true, max_results: 5, topic: news ? 'news' : 'general', ...(news ? { days: 7 } : {}), ...(site ? { include_domains: [site] } : {}) }) });
   } catch (e) { if (isAbort(e, ctx.signal)) throw e; throw err('network', 'The web search could not be reached. Answer from TRIP DATA and say live information could not be checked.'); }
   if (r.status === 401 || r.status === 403) throw err('other', 'The Tavily search key is not accepted. Tell the user to check it in Settings → Smart chat. Answer from TRIP DATA meanwhile.');
   if (r.status === 429 || r.status === 432 || r.status === 433) throw err('rate', 'The free monthly web searches are used up (Tavily resets them monthly). Answer from TRIP DATA and say so.');
   if (!r.ok) throw err('other', `The web search failed (${r.status}). Answer from TRIP DATA and say live information could not be checked.`);
   const j = await r.json().catch(() => ({}));
-  const sources = (j.results || []).filter((x) => /^https:\/\//.test(x.url || '')).slice(0, 5).map((x) => ({ title: S(x.title) || 'source', url: x.url, text: cut(x.content, 400) }));
+  // http pages (some official sites still are) are read too; only https ones become link buttons
+  const sources = (j.results || []).filter((x) => /^https?:\/\//.test(x.url || '')).slice(0, 5).map((x) => ({ title: S(x.title) || 'source', url: x.url, text: cut(x.content, 700) }));
+  if (site && !sources.length) return tavily(q, ctx);   // nothing on that site: the whole web
   ctx.usage.webSearches += 1;
-  for (const x of sources) if (!ctx.out.cites.has(x.url)) ctx.out.cites.set(x.url, { title: x.title, url: x.url });
+  // closed days the search states for the searched place itself (its name in the same sentence): the answer must not drop them
+  const kw = keyWords(q.replace(/\b(opening|hours|open|closed|days?|times?|official|site|today|address|where)\b/gi, ' '));
+  for (const sent of S(j.answer).split(/[.!?]\s+/)) {   // no lookbehind: older iPhones cannot parse it
+    if (!kw.length || !nameOK(kw, [sent])) continue;
+    for (const m of sent.matchAll(/(?:closed|except)\s+(?:on\s+|every\s+|all\s+)?(mon|tues|wednes|thurs|fri|satur|sun)days?\b/gi)) ctx.out.closed?.add(m[1].toLowerCase());
+  }
+  for (const x of sources) if (/^https:\/\//.test(x.url) && !ctx.out.cites.has(x.url)) ctx.out.cites.set(x.url, { title: x.title, url: x.url });
   const answer = S(j.answer) || sources.map((x) => `${x.title}: ${x.text}`).join('\n');
   if (!answer) throw err('other', 'The web search found nothing useful for that.');
-  return { answer: answer.slice(0, 2500), sources: sources.map(({ title, url, text }) => ({ title, url, snippet: text })) };
+  return { ...(site ? { searchedSite: site } : {}), answer: answer.slice(0, 2500), sources: sources.map(({ title, url, text }) => ({ title, url, snippet: text })),
+    how: 'Give times, days and prices exactly as these sources state them (with the season or date range if they give one) and name the source; '
+      + 'the place\'s own or an official site wins over blogs. If they disagree or do not say, say so and give the safer (shorter) hours. Never fill in hours from memory.' };
 }
-async function webSearch(query, ctx) {
+async function webSearch(query, ctx, site = null) {
   const q = privacy(S(query), ctx.C).slice(0, 300);
   if (!q) throw err('other', 'The search query was empty.');
-  if (ctx.searchKey) return tavily(q, ctx);
+  if (ctx.searchKey) return tavily(q, ctx, siteOf(site));
   let busy = false, usedUp = false;
   for (const id of SEARCH_MODELS) {
     if (searchOff.has(id)) continue;
@@ -678,6 +714,21 @@ async function webSearch(query, ctx) {
   if (busy) throw err('rate', 'Google Search is busy right now. Answer from TRIP DATA and what you know, and say that live information could not be checked just now.');
   throw Object.assign(err('other', 'Live web search needs the free Tavily key: tell the user to add it in Settings → Smart chat (tavily.com, free, no card). Google Search is not available with this free key (Google offers it only with billing). Answer from TRIP DATA and what you know, say that live information could not be checked, and say where they can check it.'), { webOff: true });
 }
+
+/* every clock time a text mentions (24 h "09:30" / "18.00", and "11 AM", "8 PM"), as minutes; and the hour ranges an answer gives */
+const hhmm = (h, m) => (+h % 24) * 60 + (+m || 0);
+// pairs of times a text gives close together ("09:30 - 17:30", "10 AM to 6 PM", "15:00 … arrives 15:25"): an hour range is backed only when both ends appear together
+function timesIn(s) {
+  const t = S(s), at = [];
+  for (const m of t.matchAll(/\b([01]?\d|2[0-4])[:.]([0-5]\d)\b/g)) at.push([m.index, hhmm(m[1], m[2])]);
+  for (const m of t.matchAll(/\b(1[0-2]|0?[1-9])(?:[:.]([0-5]\d))?\s*(a\.?m\.?|p\.?m\.?)/gi)) at.push([m.index, hhmm((+m[1] % 12) + (/p/i.test(m[3]) ? 12 : 0), m[2])]);
+  for (const m of t.matchAll(/\b(noon|midnight)\b/gi)) at.push([m.index, /noon/i.test(m[1]) ? 720 : 0]);
+  at.sort((a, b) => a[0] - b[0]);
+  const out = new Set();
+  for (let i = 0; i < at.length; i++) for (let j = i + 1; j < at.length && at[j][0] - at[i][0] <= 60; j++) out.add(`${at[i][1]}-${at[j][1]}`);
+  return out;
+}
+const RANGE = /\b([01]?\d|2[0-4])[:.]([0-5]\d)\s*(?:–|—|-|to|until|till)\s*([01]?\d|2[0-4])[:.]([0-5]\d)\b/gi;
 
 /* ───────────── place_fit: a place that is not in the plan → where it is and the planned day it fits ───────────── */
 // the plan's stops come from the trips' map links; a free day is the answer only when no planned day passes near the place
@@ -719,14 +770,17 @@ function daySeqs(C) {
   for (const x of seqs) { const h = x.d.hotel && hotels[x.d.hotel]; if (!x.seq.length && h) x.seq.push({ ...h, n: 0, mode: null, time: null, home: true }); }
   return seqs;
 }
-export function placeFit(C, P, { today = null, nextN = null } = {}) {
-  const allRows = daySeqs(C).filter((x) => x.seq.length), side = sideOf(P);
+const r5 = (n) => Math.round(n / 5) * 5;
+// real driving times (OSRM) are free-flow: city traffic makes them about 1.3–2 times longer
+const trafficMin = (sec) => [Math.max(5, r5(sec * 1.3 / 60)), Math.max(10, r5(sec * 2 / 60))];
+export async function placeFit(C, P, { today = null, nextN = null, table = null } = {}) {
+  const allRows = daySeqs(C).filter((x) => x.seq.length), side = sideOf(P), isl = /Islands/.test(side || '');
   const homes = allRows.flatMap((r) => r.seq.filter((s) => s.home).map((s) => ({ s, city: r.d.city, km: kmAB(s, P) }))).sort((a, b) => a.km - b.km);
-  const hotel = homes[0] || null;
+  const hotel = homes[0] || null, far = !hotel || hotel.km > 150;
   // right next to a planned stop (within about 200 m)
   const at = allRows.filter((r) => !isIso(today) || r.d.date >= today).flatMap((r) => r.seq.filter((s) => !s.home).map((s) => ({ r, s, km: kmAB(s, P) }))).sort((a, b) => a.km - b.km)[0];
   const base = { place: { lat: +P.lat.toFixed(5), lng: +P.lng.toFixed(5), ...(side ? { side } : {}) },
-    city: hotel && hotel.km < 150 ? hotel.city : null, fromHotel: hotel ? { km: +hotel.km.toFixed(1), taxiMin: taxiMin(roadKm(hotel.s, P)), hotel: hotel.s.name } : null };
+    city: hotel && !far ? hotel.city : null, fromHotel: hotel ? { hotel: hotel.s.name, straightKm: +hotel.km.toFixed(1), ...(far ? {} : { taxiMin: taxiMin(roadKm(hotel.s, P)) }) } : null };
   if (at && at.km < 0.2) base.nextToPlannedStop = { date: at.r.d.date, day: `Day ${at.r.d.n}: ${at.r.d.title}`, stop: at.s.name, metres: Math.round(at.km * 1000) };
   const rows = allRows.filter((r) => !isIso(today) || r.d.date >= today).map(({ d, seq }) => {
     const stops = seq.filter((s) => !s.home);
@@ -738,79 +792,199 @@ export function placeFit(C, P, { today = null, nextN = null } = {}) {
       if (!best || score < best.score) best = { A, B, det, score };
     }
     const near = stops.map((s) => ({ s, km: kmAB(s, P) })).sort((a, b) => a.km - b.km)[0] || null;
-    return { d, seq, stops, near, best, open: !!d.free || !stops.length };
+    return { d, seq, stops, near, pairs, best, open: !!d.free || !stops.length };
   }).filter((r) => r.best);
+  let planned = rows.filter((r) => !r.open).sort((a, b) => a.best.score - b.best.score);
+  const free = rows.filter((r) => r.open && kmAB(r.seq[0], P) < 150).sort((a, b) => (a.d.free ? 0 : 1) - (b.d.free ? 0 : 1) || (a.d.trips || []).length - (b.d.trips || []).length || a.d.date.localeCompare(b.d.date));
+  // real roads for the most promising days (bridges, the Golden Horn, one-way streets): one routing request
+  let routed = false;
+  if (table && !far && !isl) {
+    const cand = [...new Set([...planned.slice(0, 4), ...free.slice(0, 1)])], pts = [P], idx = new Map();
+    const id = (s) => { const k = `${s.lat.toFixed(5)},${s.lng.toFixed(5)}`; if (!idx.has(k)) { idx.set(k, pts.length); pts.push(s); } return idx.get(k); };
+    for (const r of cand) for (const s of r.seq) id(s);
+    const h = id(hotel.s);
+    const m = await table(pts);
+    if (m) {
+      const D = (a, b) => m.dur?.[a]?.[b], K = (a, b) => m.dist?.[a]?.[b];
+      for (const r of cand) {
+        let best = null;
+        for (const [A, B] of r.pairs) {
+          const a = id(A), b = id(B), ap = D(a, 0), pb = D(0, b), ab = A === B ? 0 : D(a, b);
+          if (![ap, pb, ab, K(a, 0)].every(Number.isFinite)) continue;
+          const sec = Math.max(0, ap + pb - ab), score = sec + (A !== B && (A.home || B.home) ? 240 : 0);
+          if (!best || score < best.score) best = { A, B, sec, score, secA: ap, kmA: K(a, 0) / 1000 };
+        }
+        if (best) r.road = best;
+      }
+      if (Number.isFinite(D(h, 0)) && Number.isFinite(K(h, 0))) {
+        const km = K(h, 0) / 1000;
+        Object.assign(base.fromHotel, { roadKm: +km.toFixed(1), taxiMin: trafficMin(D(h, 0)), ...(km <= 1.1 ? { walkMin: Math.max(3, Math.round(km / 4.5 * 60)) } : {}) });
+      }
+      routed = cand.some((r) => r.road);
+      if (routed) planned = [...planned.filter((r) => r.road).sort((a, b) => a.road.score - b.road.score), ...planned.filter((r) => !r.road)];
+    }
+  }
+  // a few minutes' walk from a planned stop: right after that stop, on foot (car routing overstates pedestrian streets such as İstiklal)
+  for (const r of rows) {
+    if (!r.near || r.near.km > 0.4) continue;
+    const pair = r.pairs.find(([A]) => A === r.near.s);
+    if (pair) { r.onFoot = { A: pair[0], B: pair[1], km: r.near.km * 1.3 }; r.road = null; r.best = { ...r.best, A: pair[0], B: pair[1], det: 0, score: -1 }; }
+  }
+  if (rows.some((r) => r.onFoot)) planned = [...planned.filter((r) => r.onFoot), ...planned.filter((r) => !r.onFoot)];
+  const fits = (r) => (r.onFoot ? { good: true, ok: true } : r.road ? { good: r.road.sec <= 600, ok: r.road.sec <= 1500 } : { good: r.best.det <= 8, ok: r.best.det <= 18 });
   const pr = (r) => {
-    const { A, B, det } = r.best, solo = A === B, walk = !solo && !A.home && kmAB(A, P) <= 1;
+    const x = r.road || r.best, { A, B } = x, solo = A === B;
+    const walkKm = r.onFoot ? r.onFoot.km : r.road ? x.kmA : kmAB(A, P) * 1.25, walk = !solo && walkKm <= 1.1;   // more than about 15 min on foot: a taxi
+    const leg = r.road ? trafficMin(x.secA) : taxiMin(roadKm(A, P));
     return { date: r.d.date, day: `Day ${r.d.n}: ${r.d.title}`, freeDay: !!r.d.free,
       after: solo ? 'the hotel: a separate outing from the hotel and back' : A.home ? `${A.name} (the hotel${A.n === 0 ? ', at the start of the day' : ''})` : A.name,
-      afterTrip: solo ? 0 : A.n, before: solo ? null : B.home ? `${B.name} (back to the hotel)` : B.name,
+      afterTrip: solo ? 0 : A.n, before: solo ? null : B.home ? `${B.name} (back to the hotel)` : B.name, beforeTrip: solo ? null : B.n,
       planTimeOfNextLeg: !solo && B.time ? B.time : null,
-      getThere: /Islands/.test(sideOf(P) || '') ? 'ferry only: about 1.5 h each way from Kabataş or Eminönü (check that day’s ferry times)' : walk ? `about ${Math.max(3, Math.round(kmAB(A, P) * 1.25 / 4.5 * 60))} min on foot from ${A.name}` : `taxi about ${taxiMin(roadKm(A, P)).join('–')} min from ${solo ? 'the hotel' : A.name}`,
-      extraTravelMin: /Islands/.test(sideOf(P) || '') ? [180, 240] : solo ? taxiMin(roadKm(A, P) * 2) : taxiMin(Math.max(det, 0.5)),
+      getThere: isl ? 'ferry only: about 1.5 h each way from Kabataş or Eminönü (check that day’s ferry times)'
+        : walk ? `about ${Math.max(3, Math.round(walkKm / 4.5 * 60))} min on foot from ${A.name}`
+        : `taxi about ${leg.join('–')} min from ${solo ? 'the hotel' : A.name}${r.road ? ` (${x.kmA.toFixed(1)} km by road)` : ''}`,
+      extraTravelMin: isl ? [180, 240] : r.onFoot ? [5, 10] : r.road ? trafficMin(Math.max(x.sec, 120)) : solo ? taxiMin(roadKm(A, P) * 2) : taxiMin(Math.max(x.det, 0.5)),
       nearestPlannedStop: r.near ? { name: r.near.s.name, km: +r.near.km.toFixed(1) } : null };
   };
-  const planned = rows.filter((r) => !r.open).sort((a, b) => a.best.score - b.best.score);
-  const sameCity = (r) => kmAB(r.seq[0], P) < 150;
-  const free = rows.filter((r) => r.open && sameCity(r)).sort((a, b) => (a.d.free ? 0 : 1) - (b.d.free ? 0 : 1) || (a.d.trips || []).length - (b.d.trips || []).length || a.d.date.localeCompare(b.d.date));
-  const top = planned[0], far = !hotel || hotel.km > 150;
+  const top = planned[0];
   let pick = null, verdict;
   if (far) verdict = hotel && hotel.km <= 300 ? 'far: a long day trip' : 'too far for this trip by road';
-  else if (top && top.best.det <= 8) { pick = top; verdict = 'on the way'; }
-  else if (top && top.best.det <= 18) { pick = top; verdict = 'a detour'; }
+  else if (top && fits(top).good) { pick = top; verdict = 'on the way'; }
+  else if (top && fits(top).ok) { pick = top; verdict = 'a detour'; }
   else if (free.length) { pick = free[0]; verdict = 'free day: no planned day passes near it'; }
   else if (top) { pick = top; verdict = 'a long detour'; }
   else verdict = 'no trip days left';
   if (far && free.length) pick = free[0];
   return { ...base, verdict, best: pick ? pr(pick) : null,
-    alternatives: planned.filter((r) => r !== pick && r.best.det <= 18).slice(0, 2).map(pr),
+    alternatives: planned.filter((r) => r !== pick && fits(r).ok).slice(0, 2).map(pr),
     freeDayOption: free[0] && free[0] !== pick ? { date: free[0].d.date, day: `Day ${free[0].d.n}: ${free[0].d.title}` } : null,
+    travelTimes: routed ? 'real roads (OpenStreetMap routing); ranges allow for traffic' : 'estimated from the straight-line distance',
     ...(far && hotel ? { roadHours: +(hotel.km * 1.3 / 75).toFixed(1) } : {}) };
 }
-// where a place is: OpenStreetMap (free, no key); places near the two trip cities first
+// driving times between many points in one request (OSRM on OpenStreetMap, free, no key); null when it cannot be reached
+async function roadTable(pts, signal) {
+  if (pts.length < 2 || pts.length > 60) return null;
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 8000), stop = () => ctl.abort();
+  signal?.addEventListener('abort', stop, { once: true });
+  try {
+    const coords = pts.map((p) => `${p.lng.toFixed(5)},${p.lat.toFixed(5)}`).join(';');
+    const r = await fetch(`https://router.project-osrm.org/table/v1/driving/${coords}?annotations=duration,distance`, { signal: ctl.signal });
+    const j = r.ok ? await r.json() : null;
+    return j?.code === 'Ok' ? { dur: j.durations, dist: j.distances } : null;
+  } catch (e) { if (signal?.aborted) throw e; return null; } finally { clearTimeout(t); signal?.removeEventListener('abort', stop); }
+}
+// where a place is: OpenStreetMap (free, no key); places near the two trip cities first, the attraction itself before a bus stop named after it
 const CITIES = [{ lat: 41.02, lng: 28.98 }, { lat: 36.89, lng: 30.71 }];
-async function geocode(place, city, ctx) {
-  const q = S(place).slice(0, 120), c = S(city);
+const NOT_OFFICIAL = /(tripadvisor|wikipedia|wikimapia|google\.|iett\.istanbul|geziyerler|gezimanya|foursquare|booking\.com|yelp|tiktok)/i;
+const TRANSIT = /^(highway|railway|public_transport|aeroway)$/;
+// a map link or plain coordinates: the exact point (Google Maps puts the place at !3d…!4d…, the view centre at @…)
+function llFrom(s) {
+  const t = S(s), m = /!3d(-?\d{1,2}\.\d{3,})!4d(-?\d{1,3}\.\d{3,})/.exec(t) || /[?&](?:q|ll|query|destination)=(-?\d{1,2}\.\d{3,})(?:,|%2C)\s*(-?\d{1,3}\.\d{3,})/i.exec(t)
+    || /@(-?\d{1,2}\.\d{3,}),(-?\d{1,3}\.\d{3,})/.exec(t) || /^\s*(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})\s*$/.exec(t);
+  const p = m && { lat: +m[1], lng: +m[2] };
+  return p && p.lat > 35 && p.lat < 43 && p.lng > 25 && p.lng < 45 ? p : null;
+}
+// the words that make a name that place ("kk" in "KK Concept"); generic words alone never match ("Elite Concept" apartments)
+const GENERIC = new Set(('the a an and of in at on de da istanbul antalya turkey turkiye concept koncept cafe kafe coffee kahve restaurant restoran lokanta museum muzesi muze park parki '
+  + 'mosque camii cami palace sarayi saray store shop magaza boutique bar lounge hotel otel beach plaji mall avm center centre house evi tower kulesi square meydani '
+  + 'market pazar pazari bazaar carsisi street caddesi sokak sokagi new old grand big').split(' '));
+const keyWords = (s) => norm(s).split(' ').filter((w) => w.length >= 2 && !GENERIC.has(w));
+const nameOK = (words, names) => {
+  if (!words.length) return true;
+  const have = norm(names.filter(Boolean).join(' ')).split(' ');
+  return words.some((w) => have.some((n) => n === w || (w.length >= 4 && n.length >= 4 && (n.startsWith(w) || w.startsWith(n)))));
+};
+// a Turkish address as the map spells it: "Şair Nigar Sk. 18/A, 34363 Şişli/İstanbul" → "Şair Nigar Sokağı, Şişli, İstanbul", then "Şair Nigar, Şişli, İstanbul"
+const SUFFIX = { sk: 'Sokağı', sok: 'Sokağı', sokak: 'Sokağı', sokagi: 'Sokağı', cd: 'Caddesi', cad: 'Caddesi', cadde: 'Caddesi', caddesi: 'Caddesi', blv: 'Bulvarı', bulvar: 'Bulvarı', bulvari: 'Bulvarı' };
+function addressTries(address, city) {
+  const parts = S(address).replace(/https?:\/\/\S+/g, '').replace(/(\d+)\s*\/\s*[a-z0-9]{1,3}\b/gi, '$1').split(/[,/\n]/).map((p) => p.replace(/\b\d{5}\b/g, '').trim()).filter((p) => p && !/^(türkiye|turkiye|turkey)$/i.test(p));
+  const isSt = (p) => p.split(/\s+/).some((w) => SUFFIX[norm(w)] || ['street', 'st', 'avenue', 'ave', 'yolu'].includes(norm(w)));
+  const i = parts.findIndex(isSt), cityP = parts.find((p) => /^(istanbul|antalya)$/.test(norm(p))) || S(city);
+  const tail = parts.slice(i + 1).filter((p) => p !== cityP && !/^\d/.test(p));
+  const tries = [];
+  if (i >= 0) {
+    const ws = parts[i].replace(/\bno:?\s*/i, '').split(/\s+/), k = ws.findIndex((w) => SUFFIX[norm(w)] || ['street', 'st', 'avenue', 'ave', 'yolu'].includes(norm(w)));
+    const nameW = ws.slice(0, k).join(' '), suf = SUFFIX[norm(ws[k])];
+    if (nameW) for (const s of [suf ? `${nameW} ${suf}` : parts[i], nameW]) tries.push([s, ...tail, cityP].filter(Boolean).join(', '));
+  }
+  if (!parts.some((p) => p !== cityP)) return [];   // only a short link or just the city: nothing to place it by
+  tries.push([...parts.filter((p) => p !== cityP), cityP].filter(Boolean).join(', '));
+  return [...new Set(tries)];
+}
+async function geocode(place, city, ctx, address = '') {
+  const exact = llFrom(address) || llFrom(place);
+  if (exact) return { ...exact, found: 'the exact point from the map link or coordinates', contacts: {} };
+  const q = S(place).replace(/https?:\/\/\S+/g, '').trim().slice(0, 120), c = S(city), words = keyWords(q);
   const tries = [...new Set([c && !norm(q).includes(norm(c)) ? `${q}, ${c}` : null, q].filter(Boolean))];
   const near = (h) => Math.min(...CITIES.map((x) => kmAB(x, h)));
   const get = async (url) => { try { const r = await fetch(url, { signal: ctx.signal }); return r.ok ? await r.json() : null; } catch (e) { if (isAbort(e, ctx.signal)) throw e; return null; } };
+  // a street address (from the web or a Google Maps share): close enough to plan the day
+  if (S(address)) {
+    for (const t of addressTries(address, c)) {
+      const j = await get(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=3&countrycodes=tr&accept-language=en&q=${encodeURIComponent(t)}`);
+      // street or neighbourhood level only (a whole district or city would plan the wrong spot)
+      const h = (Array.isArray(j) ? j : []).filter((x) => +x.place_rank >= 18).map((x) => ({ lat: +x.lat, lng: +x.lon, found: `${cut(x.display_name, 140)} (located by its address)`, contacts: {} })).find((x) => isFinite(x.lat) && near(x) < 400);
+      if (h) return h;
+    }
+  }
+  if (!q) return null;
   for (const t of tries) {
-    const j = await get(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=tr&accept-language=en&q=${encodeURIComponent(t)}`);
-    const hits = (Array.isArray(j) ? j : []).map((h) => ({ lat: +h.lat, lng: +h.lon, found: cut(h.display_name, 160) })).filter((h) => isFinite(h.lat) && isFinite(h.lng));
+    const j = await get(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&countrycodes=tr&accept-language=en&extratags=1&namedetails=1&q=${encodeURIComponent(t)}`);
+    const hits = (Array.isArray(j) ? j : []).filter((h) => nameOK(words, [h.name, ...Object.values(h.namedetails || {})])).map((h) => {
+      const x = h.extratags || {}, web = S(x.website || x['contact:website'] || x.url), insta = S(x['contact:instagram'] || (/instagram\.com/i.test(web) ? web : ''));
+      return { lat: +h.lat, lng: +h.lon, found: cut(h.display_name, 160), transit: TRANSIT.test(h.category || ''),
+        contacts: { ...(web && !NOT_OFFICIAL.test(web) && !/instagram\.com|facebook\.com/i.test(web) ? { officialSite: web } : {}), ...(insta ? { instagram: insta } : {}),
+          ...(S(x.phone || x['contact:phone']) ? { phone: S(x.phone || x['contact:phone']) } : {}),
+          ...(S(x.opening_hours) ? { mapHoursUnverified: S(x.opening_hours) } : {}) } };
+    }).filter((h) => isFinite(h.lat) && isFinite(h.lng)).sort((a, b) => a.transit - b.transit);
     if (hits.length) return hits.find((h) => near(h) < 150) || hits[0];
   }
   const bias = /antalya|lara|kemer|belek|side|manavgat/i.test(`${q} ${c}`) ? CITIES[1] : CITIES[0];
   const j = await get(`https://photon.komoot.io/api/?limit=5&lang=en&lat=${bias.lat}&lon=${bias.lng}&q=${encodeURIComponent(tries[0])}`);
-  const hits = (j?.features || []).filter((f) => f?.properties?.countrycode === 'TR').map((f) => ({ lat: +f.geometry.coordinates[1], lng: +f.geometry.coordinates[0],
-    found: [f.properties.name, f.properties.district || f.properties.city, f.properties.state].filter(Boolean).join(', ') }));
+  const hits = (j?.features || []).filter((f) => f?.properties?.countrycode === 'TR' && nameOK(words, [f.properties.name])).map((f) => ({ lat: +f.geometry.coordinates[1], lng: +f.geometry.coordinates[0],
+    found: [f.properties.name, f.properties.street, f.properties.district || f.properties.city, f.properties.state].filter(Boolean).join(', '), contacts: {} }));
   return hits.find((h) => near(h) < 150) || hits[0] || null;
 }
-async function placeFitTool({ place, city }, ctx) {
+async function placeFitTool({ place, city, address }, ctx) {
   const C = ctx.C, nq = norm(place).replace(/^the /, '');
-  if (!nq) throw err('other', 'Which place? The name was empty.');
+  if (!nq && !S(address)) throw err('other', 'Which place? The name was empty.');
   // a place the plan already has by name
   const sight = (C.sights || []).find((s) => s.day && [s.name, ...(s.aliases || [])].some((a) => norm(a).replace(/^the /, '') === nq));
   const venue = (C.venues || []).find((v) => norm(v.name) === nq);
   const named = sight ? { date: sight.day, name: sight.name } : venue ? { date: venue.day, name: venue.name, venueId: venue.id } : null;
   if (named) { const d = C.days.find((x) => x.date === named.date); return { verdict: 'already in the plan', alreadyInPlan: { date: named.date, day: d ? `Day ${d.n}: ${d.title}` : named.date, stop: named.name, ...(named.venueId ? { venueId: named.venueId } : {}) } }; }
-  const hit = await geocode(place, city, ctx);
-  if (!hit) throw err('other', `"${S(place)}" was not found on the map. If you know its district or street (web_search can tell you), call place_fit again with that, e.g. "Kuruçeşme, Istanbul".`);
-  const r = placeFit(C, hit, { today: ctx.today, nextN: ctx.nextN });
-  return { ...r, place: { name: S(place), found: hit.found, ...r.place },
-    rules: 'Recommend "best" (a planned day that passes near it) with the stop to go after and the stop before. Use a free day only when the verdict says so. Then ask whether to add it as optional; call add_optional_stop only after they say yes, with best.date and best.afterTrip.' };
+  const hit = await geocode(place, city, ctx, address);
+  if (!hit) throw err('other', `"${S(place)}" is not on the free map${S(address) ? ' and its address could not be placed either' : ''}. Do not guess where it is. `
+    + `Search the web for what and where it is ("${S(place)} Istanbul" or "${S(place)} address": its own site, Instagram, TripAdvisor, Foursquare), then call place_fit again with the street address as address. `
+    + 'If it still cannot be found, say so and ask them to paste its Google Maps share (open the place in Google Maps → Share → paste here): the name, address and link are enough.');
+  const r = await placeFit(C, hit, { today: ctx.today, nextN: ctx.nextN, table: (pts) => roadTable(pts, ctx.signal) });
+  // when they would be there: the plan's (estimated) time for the leg that leaves the stop before it
+  if (typeof ctx.handlers?.leg_times === 'function') {
+    const when = async (o) => {
+      if (!o || o.beforeTrip == null) return o;
+      let t = null; try { t = (await ctx.handlers.leg_times(o.date))?.[o.beforeTrip]; } catch {}
+      return t?.at ? { ...o, timeThere: o.afterTrip ? `about ${t.at}${t.est ? ' (estimated)' : ''}, when the plan leaves ${o.after}` : `before ${t.at}, when the day's first leg leaves` } : o;
+    };
+    r.best = await when(r.best); r.alternatives = await Promise.all(r.alternatives.map(when));
+  }
+  const k = hit.contacts || {};
+  return { ...r, place: { name: S(place), found: hit.found, ...r.place }, ...(Object.keys(k).length ? { contacts: k } : {}),
+    rules: 'Check "found": if it is not the place they mean (another branch or a namesake), say so and ask. Recommend "best" (a planned day that passes near it) with the stop to go after and the stop before; a free day only when the verdict says so. '
+      + 'Opening hours: web_search with site = contacts.officialSite when there is one; otherwise search the open web (the place\'s Instagram, TripAdvisor, Foursquare, guides) and say where the hours come from. mapHoursUnverified is community map data: mention it only if nothing better is found, and say it may be out of date. '
+      + 'Then ask whether to add it as optional; call add_optional_stop only after they say yes, with best.date and best.afterTrip.' };
 }
 
 async function runCall(part, ctx) {
   const { id, name, args } = part.functionCall || {}, out = ctx.out, input = args && typeof args === 'object' ? args : {};
   const reply = (response) => ({ functionResponse: { ...(id ? { id } : {}), name, response } });
   const fail = (m) => reply({ error: privacy(S(m) || 'The app could not do that.', ctx.C).slice(0, 2000) });
-  const ok = (r) => reply({ result: privacy(resultText(r), ctx.C) });
+  const ok = (r) => { const t = resultText(r); ctx.out.seen?.push(t); return reply({ result: privacy(t, ctx.C) }); };
   const schema = SCHEMA[name];
   if (!schema || (name === 'web_search' && !ctx.web)) return fail(`Unknown tool "${name}". Available: ${Object.keys(SCHEMA).filter((k) => k !== 'web_search' || ctx.web).join(', ')}.`);
   const bad = check(schema, input);
   if (bad) return fail(JSON.stringify({ INVALID_INPUT: bad }));
   try {
-    if (name === 'web_search') return ok(await webSearch(input.query, ctx));
+    if (name === 'web_search') return ok(await webSearch(input.query, ctx, input.site));
     if (name === 'weather') return ok(await weatherNow(input, ctx));
     if (name === 'place_fit') return ok(await placeFitTool(input, ctx));
     if (name === 'create_pdf') {
@@ -917,12 +1091,16 @@ End an answer with one to three helpful buttons when they help (the next ticket,
 - After saving, confirm in one short line what you saved; the app shows an Undo button. Do not ask "shall I?" first unless something essential is missing (add_optional_stop is the exception: always ask first). Never call these tools for hypothetical questions.
 
 # A place that is not in the plan
-When they ask about a place TRIP DATA does not plan (where is it, can we go, when, which day, fit it in, add it), call place_fit (not for places TRIP DATA already plans: say which day and stop). Then answer in this order:
+When they ask about a place TRIP DATA does not plan (where is it, can we go, when, which day, fit it in, add it), call place_fit (not for places TRIP DATA already plans: say which day and stop).
+- They may send a screenshot of the place (Google Maps, Instagram …) or paste a Google Maps share (name, address, link). Read the name, address, opening hours, phone and website from it and call place_fit with place and address (or the link). Hours on a Google Maps screenshot are Google's own listing: use them and say so ("Google Maps shows: opens 11:00 on Saturday"); if only some days are visible, say which, and suggest a screenshot of the full hours (tap the hours in Google Maps) or the website for the rest.
+- If place_fit cannot find it, or "found" is clearly a different place, never guess where it is: search the web for what and where it is, call place_fit again with the address, and if it is still unclear say so and ask for the Google Maps share or a screenshot of it.
+Then answer in this order:
 1. Where it is: the area and, in Istanbul, which side (European or Asian), and how far it is from the hotel by taxi.
 2. The best day from place_fit "best": the day, the stop to go AFTER and the stop BEFORE, how to get there (walk or taxi minutes) and the extra time it adds. Prefer a planned day that passes near it, even if the day gets a little fuller; never jump to a free day because it is easier. Use a free day only when place_fit's verdict says no planned day is near (or that day truly has no room), and say why. If there is a good alternative day, mention it in one line.
-3. Check the fit: call get_day for that day when timings matter, and use web_search (when available) for the place's opening hours and closed days; if it is closed that day, pick the next best day.
-4. End by asking: "Shall I add it to <day, date> as optional?" Do not add it before they say yes. When they say yes (in a later message), call add_optional_stop with best.date, best.afterTrip, lat, lng and a short note (how to get there, time inside, opening hours), then confirm in one line; the app marks it "Optional · as per chat". If they pick another day or stop, use theirs.
-5. If the place is far from both cities, say how far (hours by road) and whether it is realistic as a day trip on a free day.
+3. Opening hours: use web_search (when available), e.g. "Rahmi Koç Museum opening hours" (no dates or "today" in the query). When place_fit gives contacts.officialSite, pass it as site so the place's own pages answer. A place without its own website (a café, a shop, a concept store): search the open web (its Instagram, TripAdvisor, Foursquare, guides) and say where the hours come from; give contacts.phone or contacts.instagram to confirm. Quote the hours exactly as found, with the last entry or last ticket time when the source gives one; state closed days plainly ("closed on Mondays", never "might be closed"); never fill hours in from memory or complete a week from one day (if the source only says "opens 11:00 on Saturday", say just that). Every time range you give must appear in a source you read; the app flags any it cannot find. If sources disagree, say so and plan with the safer (shorter) hours. If nothing confirms them, say so and suggest the place's Google Maps page or a call.
+4. Check the time fits: place_fit's timeThere says when they would be there in the plan (call get_day for more detail). The visit must start after opening and end before closing, with arrival at least an hour before the last entry; never suggest going before it opens or on its closed day. If the slot does not fit, pick another stop or day that does and say why.
+5. End by asking: "Shall I add it to <day, date> as optional?" Do not add it before they say yes. When they say yes (in a later message), call add_optional_stop with best.date, best.afterTrip, lat, lng and a short note (how to get there, time inside, opening hours), then confirm in one line; the app marks it "Optional · as per chat". If they pick another day or stop, use theirs.
+6. If the place is far from both cities, say how far (hours by road) and whether it is realistic as a day trip on a free day.
 
 # PDFs
 When they ask for a PDF, something printable or shareable, or "send me" a plan or list, call create_pdf with a complete, well-structured document (headings, short paragraphs, bullets, tables, callouts, key-value rows) using exact times, prices, addresses, phones and references from TRIP DATA. English only, keep Turkish letters. Then reply with ONE short sentence; never paste the PDF content into the chat.
@@ -980,8 +1158,9 @@ export async function chatTurn({ apiKey, model, webSearch = false, searchKey = n
   const question = privacy(T(user.text), C) || (atts.length ? 'Please look at the attached file.' : '…');
   const contents = [...base, { role: 'user', parts: [{ text: liveContext({ ...live, content: C }) }, ...atts.map(attPart),
     { text: atts.length ? `${question}\n\n(Attached: ${names.map((n) => `"${n.replace(/"/g, "'")}"`).join(', ')})` : question }] }];
-  const out = { actions: [], pdfs: [], cites: new Map(), suggestions: [] }, usage = newUsage(), origin = new Map(), webTurns = new Set();
-  const st = { ...choose(model), switched: false, actions: out.actions };
+  const out = { actions: [], pdfs: [], cites: new Map(), suggestions: [], closed: new Set(), seen: [] }, usage = newUsage(), origin = new Map(), webTurns = new Set();
+  const st = { ...choose(model), switched: false, actions: out.actions, signal,
+    onWait: (s) => onStatus(`Gemini is busy or at its per-minute limit · trying again in ${s} s`) };
   if (st.M !== st.from) out.actions.push(fallbackAction(st.M, st.from, 'daily'));
   const ctx = { apiKey: key, handlers, out, C, signal, usage, web: !!webSearch, searchKey: S(searchKey) || null, today: nowOf(live).today, nextN: live?.next?.n || null };
   let text = '', fresh = false, shown = false, refused = false, finish = null, mode = 'AUTO', retried = false;
@@ -1024,6 +1203,25 @@ export async function chatTurn({ apiKey, model, webSearch = false, searchKey = n
     try { Object.assign(e, { actions: out.actions, pdfs: out.pdfs, usage, partialText: text }); } catch {}
     throw tag(e, 'chat');
   }
+  // a closed day the search found but the answer left out is added (lighter models sometimes drop "except Mondays")
+  const DAYS = { mon: ['Monday', 'الاثنين', 'الإثنين'], tues: ['Tuesday', 'الثلاثاء'], wednes: ['Wednesday', 'الأربعاء', 'الاربعاء'], thurs: ['Thursday', 'الخميس'],
+    fri: ['Friday', 'الجمعة', 'الجمعه'], satur: ['Saturday', 'السبت'], sun: ['Sunday', 'الأحد', 'الاحد'] };
+  const missed = [...out.closed].filter((d) => DAYS[d] && !DAYS[d].some((w) => text.toLowerCase().includes(w.toLowerCase())));
+  if (text && missed.length) {
+    const ar = /[؀-ۿ]/.test(text), list = missed.map((d) => (ar ? DAYS[d][1] : DAYS[d][0] + 's'));
+    fresh = false; emit(ar ? `\n\n**ملاحظة:** مغلق يوم ${list.join(' و')} (حسب نتيجة البحث).` : `\n\n**Note:** closed on ${list.join(' and ')} (per the search result).`);
+  }
+  // opening hours the answer gives for a place must come from something read in this turn (search, map, screenshot text, trip data): otherwise it says so
+  const placeTurn = out.seen.length && contents.slice(start).some((c) => (c.parts || []).some((p) => ['web_search', 'place_fit'].includes(p.functionCall?.name)));
+  if (text && placeTurn && !(atts.length && !/Screenshot shows:/.test(question))) {
+    const known = timesIn([sys, question, ...out.seen].join('\n'));
+    const loose = [...text.matchAll(RANGE)].filter((m) => !known.has(`${hhmm(m[1], m[2])}-${hhmm(m[3], m[4])}`)).map((m) => m[0].replace(/\s+/g, ' '));
+    if (loose.length) {
+      const ar = /[؀-ۿ]/.test(text), list = [...new Set(loose)].slice(0, 4).join(', ');
+      fresh = false; emit(ar ? `\n\n**تنبيه:** لم أجد ${list} في المصادر التي راجعتها؛ تأكد من صفحة المكان على خرائط جوجل أو اتصل بهم قبل الذهاب.`
+        : `\n\n**Unconfirmed:** I could not find ${list} in the sources I checked, so treat ${loose.length > 1 ? 'those hours' : 'that'} as unconfirmed: check the place's Google Maps page or call before going.`);
+    }
+  }
   if (contents[contents.length - 1].role === 'user') contents.push({ role: 'model', parts: [{ text: text || '…' }] });
   return {
     text, history: compact(contents, start, names, webTurns), usage, citations: [...out.cites.values()], searchSuggestions: out.suggestions,
@@ -1054,10 +1252,11 @@ function proposalSchema(cats) {
     transcript: str('If the TRANSCRIPT line says it is needed: all readable text of the document in its original language, at most 3000 characters; otherwise an empty string.'),
     confidence: { type: 'number', description: '0 to 1.' },
     isIdDocument: { type: 'boolean', description: 'Passport, ID card, visa or residence permit.' },
+    placeListing: { type: 'boolean', description: 'A screenshot of a map or place listing (Google Maps, Apple Maps, an Instagram profile, a TripAdvisor page) showing a place, not a ticket, booking or receipt.' },
     todoId: nul('string', 'Id of an OPEN to-do this document completes.'),
     expense: { anyOf: [{ type: 'null' }, obj({ amount: { type: 'number' }, currency: { type: 'string', enum: CURRENCIES }, category: { type: 'string', enum: cats } }, ['amount', 'currency', 'category'])],
       description: 'Only for receipts or tickets bought during the trip; null for prepaid bookings.' },
-  }, ['kind', 'title', 'summary', 'date', 'endDate', 'time', 'dayIso', 'tripN', 'bookingId', 'ref', 'place', 'price', 'people', 'todos', 'notes', 'facts', 'transcript', 'confidence', 'isIdDocument', 'todoId', 'expense']);
+  }, ['kind', 'title', 'summary', 'date', 'endDate', 'time', 'dayIso', 'tripN', 'bookingId', 'ref', 'place', 'price', 'people', 'todos', 'notes', 'facts', 'transcript', 'confidence', 'isIdDocument', 'placeListing', 'todoId', 'expense']);
 }
 
 const CLASSIFY_SYSTEM = `You file travel documents for a couple's trip app (the trip days, bookings and to-dos are given below). Read the attached document (a PDF, photo or screenshot of a ticket, booking, voucher or receipt) and describe it in the JSON format requested, in English.
@@ -1071,6 +1270,7 @@ const CLASSIFY_SYSTEM = `You file travel documents for a couple's trip app (the 
 - todos = only real actions the document asks for (print the voucher, check in online from …, pay the balance on arrival …). notes = at most 4 short useful facts (meeting point, what to bring, deadlines).
 - ref is a booking, confirmation, PNR, order or ticket number, or the policy number for insurance; never a passport or ID number.
 - Never copy passport numbers, ID-card numbers, dates of birth, PINs or card numbers into any field.
+- placeListing = true for a screenshot of a map or place listing (Google Maps, Apple Maps, an Instagram profile, a TripAdvisor or Foursquare page) that shows a place's name, address or opening hours rather than a ticket, booking or receipt; then kind other, place = the place's name, and facts = its address, the opening hours shown, phone and website.
 - If the document is unreadable or unrelated, use kind other and a confidence of 0.3 or less.`;
 
 function classifyPrompt(C, name, today, needText = false) {
@@ -1164,7 +1364,7 @@ export function cleanProposal(raw = {}, C = {}, { today = null } = {}) {
     facts: (Array.isArray(r.facts) ? r.facts : []).filter((n) => !piiText(S(n))).map((n) => t(n, 160)).filter(Boolean).slice(0, 10),
     transcript: T(dropPii(r.transcript)).slice(0, 3000),
     confidence: Math.max(0, Math.min(1, Number(r.confidence) || 0)),
-    isIdDocument: kind === 'id' || r.isIdDocument === true, todoId: null, expense: null, source: 'ai',
+    isIdDocument: kind === 'id' || r.isIdDocument === true, placeListing: r.placeListing === true && kind === 'other', todoId: null, expense: null, source: 'ai',
   };
   const text = [p.title, p.summary, p.place, p.ref, ...p.notes].filter(Boolean).join(' ');
   p.dayIso = dayFor(p, C);

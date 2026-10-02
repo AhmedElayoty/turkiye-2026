@@ -888,6 +888,8 @@ function aiHandlers() {
     add_todo: (x) => { const t = addUserTodo(x || {}); return { ok: true, id: t.id, title: t.title, due: t.due, time: t.time }; },
     add_expense: (x) => { const e = addExpense(x || {}); return { ok: true, id: e.id, logged: `${e.cur === 'TRY' ? fmtTry(e.amount) : fmtAed(e.amount)} · ${e.cat}`, aed: Math.round(e.aed) }; },
     add_day_note: ({ date, text } = {}) => { const n = addNote(String(date || '').slice(0, 10), text); return { ok: true, id: n.id }; },
+    // not a tool: place_fit asks when each leg leaves (the same estimate the Today screen uses)
+    leg_times: (date) => { const d = dayBy(String(date || '').slice(0, 10)); if (!d) return {}; return Object.fromEntries(nextStep(d, 0, { doneN: 0, content: C() }).timeline.map(x => [x.trip.n, { at: x.at, est: !!x.est }])); },
     add_optional_stop: (x = {}) => { const n = addStop(x); return { ok: true, id: n.id, label: `${n.stop.name} · optional on ${dateLabel(n.iso)}`, shownAs: 'Optional · as per chat' }; },
     update_document: async ({ id, ...p } = {}) => {
       const x = u(id);
@@ -919,9 +921,10 @@ function paintMsg(m) {
     if (nearBottom) window.scrollTo(0, document.documentElement.scrollHeight);
   });
 }
-async function sendAi(q, { voice = false } = {}) {
+async function sendAi(q, { voice = false, attachments = [], echo = true, shown = null } = {}) {
   const msg = { ai: true, text: '', status: 'Thinking…', streaming: true };
-  state.chat.push({ me: true, text: (voice ? '🎤 ' : '') + q }, msg); trimChat(); renderChat();
+  if (echo) state.chat.push({ me: true, text: shown ?? (voice ? '🎤 ' : '') + q });
+  state.chat.push(msg); trimChat(); renderChat();
   const ctrl = new AbortController(); state.aiBusy = ctrl; setSendMode(true);
   let api, lock = null;
   try { lock = await navigator.wakeLock?.request('screen'); } catch {}   // a locked screen kills the stream on iPhone
@@ -929,7 +932,7 @@ async function sendAi(q, { voice = false } = {}) {
   for (const k of ['add_todo', 'add_expense', 'add_day_note', 'add_optional_stop', 'update_document']) { const f = H[k]; H[k] = async (x) => { msg.changed = true; return f(x); }; }
   try {
     api = await aiApi();
-    const res = await api.chatTurn({ apiKey: state.ai.key, model: state.ai.model, webSearch: true, searchKey: setting('searchKey'), history: state.aiHistory, user: { text: q, attachments: [] },
+    const res = await api.chatTurn({ apiKey: state.ai.key, model: state.ai.model, webSearch: true, searchKey: setting('searchKey'), history: state.aiHistory, user: { text: q, attachments },
       content: C(), live: liveInfo(), handlers: H, signal: ctrl.signal,
       onText: (dt) => { msg.text += dt; msg.status = null; paintMsg(msg); }, onStatus: (s) => { msg.status = s; paintMsg(msg); } });
     if (res.text) msg.text = res.text;
@@ -949,9 +952,11 @@ async function sendAi(q, { voice = false } = {}) {
     if (ctrl.signal.aborted) msg.note = 'Stopped.';
     else {
       const fe = api ? api.friendlyError(e) : { code: 'network', message: 'The AI could not be loaded.' };
-      msg.error = fe.message; if (!msg.changed) msg.retry = q;
+      // a screenshot question: "Try again" re-asks with what was read from it (the built-in helper cannot see pictures)
+      msg.error = attachments.length ? fe.message.replace(/\s*The built-in helper answered instead\.?/, ' Try again in a moment.') : fe.message; if (!msg.changed) msg.retry = q;
       // no internet or the AI unreachable: answer with the built-in helper instead
-      if (['network', 'overloaded', 'rate', 'other'].includes(fe.code)) { try { state.chat.push({ res: answer(q, ctx()), fallback: true }); } catch {} }
+      // (not for a screenshot: the built-in helper cannot see pictures)
+      if (['network', 'overloaded', 'rate', 'other'].includes(fe.code) && !attachments.length) { try { state.chat.push({ res: answer(q, ctx()), fallback: true }); } catch {} }
     }
   } finally {
     msg.streaming = false; msg.status = null; state.aiBusy = null; setSendMode(false); try { await lock?.release(); } catch {}
@@ -1037,8 +1042,13 @@ async function takeShared() {
 }
 function nextShared() {
   const it = state.inbox?.shift(); if (!it) return;
+  // a place shared from Google Maps (name, address, link): the chat says where it is and which day it fits
+  if (it.kind === 'text') {
+    if (route().a !== 'ask') history.replaceState(null, '', location.pathname + location.search + '#ask'), render();
+    return send(`Where is this place and which trip day fits it best (after which stop)? Is it open then?\n${String(it.text || '').slice(0, 1500)}`);
+  }
   if (route().a !== 'docs') history.replaceState(null, '', location.pathname + location.search + '#docs'), render();
-  ingestFile(new File([it.bytes], it.name || 'shared.pdf', { type: it.type || 'application/pdf' }), { from: 'docs' });
+  ingestFile(new File([it.bytes], it.name || 'shared.pdf', { type: it.type || 'application/pdf' }), { from: 'share' });
 }
 /* voice: tap the mic to record, tap again to send; the AI writes down what was said and answers it */
 async function micTap() {
@@ -1144,6 +1154,15 @@ async function ingestFile(file, { from = 'docs', dayHint = null } = {}) {
         prop = await api.classifyDocument({ apiKey: state.ai.key, model: state.ai.model, file: { mime: f.mime, base64: I.toBase64(f.bytes), name: f.name, text }, content: C(), today: todayISO(), live: liveInfo() });
         if (prop?.usage) { try { trackUsage(api.estimateCost(state.ai.model, prop.usage), prop.usage); } catch {} }
       } catch (e) { console.warn(e); prop = null; try { why = (await aiApi()).friendlyError(e).message; } catch { why = 'The AI could not read it.'; } }
+    }
+    // a screenshot of a place (Google Maps, Instagram …) sent in the chat is a question about that place, not a document to file
+    if ((chat || from === 'share') && prop?.placeListing && f.type === 'image' && aiReady() && !state.aiBusy) {
+      if (chat) { const i = state.chat.indexOf(chat); if (i >= 0) state.chat.splice(i, 1); const me = state.chat[state.chat.length - 1]; if (me?.me) me.text = `📍 ${prop.place || 'A place'} (screenshot)`; }
+      else { closeSheet(); if (route().a !== 'ask') { go('#ask'); await new Promise(r => setTimeout(r, 200)); } state.chat.push({ me: true, text: `📍 ${prop.place || 'A place'} (screenshot)` }); }
+      const box = $('#chatInput'), typed = (box?.value || '').trim(); if (box) box.value = '';
+      const seen = [prop.place, ...(prop.facts || [])].filter(Boolean).join('; ');
+      return sendAi(`${typed || 'Where is this place, which trip day fits it best (after which stop), and is it open then?'}${seen ? `\n\nScreenshot shows: ${seen}` : ''}`,
+        { echo: !!typed, shown: typed, attachments: [{ name: f.name, mime: f.mime, base64: I.toBase64(f.bytes) }] });
     }
     if (!prop) prop = I.classifyText(text, C(), { filename: file.name, today: todayISO() });
     if (!text && prop.transcript) text = String(prop.transcript);   // a photo or scan: the AI wrote down its text
