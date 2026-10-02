@@ -1,5 +1,5 @@
 /* Türkiye 2026 · service worker. VERSION and ASSETS are stamped by build/build_v2.py. */
-const VERSION = '20261002-163527';
+const VERSION = '20261002-203145';
 const ASSETS = [
  "./",
  "./index.html",
@@ -26,7 +26,7 @@ const ASSETS = [
  "./vault/vault.json",
  "./version.json",
  "./vault/755b7fd9b0d30b0d.enc",
- "./vault/1b7329cc08c7e2ba.enc",
+ "./vault/2fec9ffecdd2eb75.enc",
  "./vault/145b8e68aa0740dc.enc",
  "./vault/8ea4fdb19c5a945d.enc",
  "./vault/e9fa6cedef0f2ef1.enc",

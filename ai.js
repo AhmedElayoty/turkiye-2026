@@ -513,9 +513,10 @@ export const TOOL_DEFS = [
       kind: { type: 'string', enum: KINDS, description: 'New document type.' },
       notes: { type: 'array', items: { type: 'string' }, description: 'Replacement notes, at most 4 short facts.' },
     }, ['id']),
-  fn('read_document', 'Returns one document the user added (listed in app_state as u:<id>): how it is filed plus the text the phone read from it '
-    + '(photos have no text). Call it when they ask what a document they added says.',
-    { id: str('The document id, with or without the "u:" prefix.') }, ['id']),
+  fn('read_document', 'Returns what a document says: a document the user added (u:<id> in app_state: how it is filed, key facts and its text) '
+    + 'or a trip document by its file id from TRIP DATA (ticket, hotel or transfer confirmation, insurance certificate: the facts read from it). '
+    + 'Call it when they ask what a document says (rules, baggage, inclusions, meeting point, policies).',
+    { id: str('A u:<id> of an added document, or a trip file id such as hotel-istanbul-arise.') }, ['id']),
   fn('list_documents', 'Lists every document the user added with how each one is filed (kind, title, date, day, trip, reference). app_state already '
     + 'lists up to 30; call this only when you need the full list.'),
 ];
@@ -853,12 +854,14 @@ function proposalSchema(cats) {
     people: nul('integer', 'Number of people.'),
     todos: { type: 'array', description: 'Only real actions the document asks for.', items: obj({ title: str('Action.'), due: nul('string', 'YYYY-MM-DD.'), time: nul('string', 'HH:MM.') }, ['title', 'due', 'time']) },
     notes: { type: 'array', items: { type: 'string' }, description: 'At most 4 short useful facts.' },
+    facts: { type: 'array', items: { type: 'string' }, description: 'Up to 10 short English sentences with everything the travellers may ask about later: times (boarding, start, check-in/out), meeting point, address, gate/seat, what is included or not, rules, what to bring, phone numbers, prices, cancellation terms. Only what the document says.' },
+    transcript: str('If the TRANSCRIPT line says it is needed: all readable text of the document in its original language, at most 3000 characters; otherwise an empty string.'),
     confidence: { type: 'number', description: '0 to 1.' },
     isIdDocument: { type: 'boolean', description: 'Passport, ID card, visa or residence permit.' },
     todoId: nul('string', 'Id of an OPEN to-do this document completes.'),
     expense: { anyOf: [{ type: 'null' }, obj({ amount: { type: 'number' }, currency: { type: 'string', enum: CURRENCIES }, category: { type: 'string', enum: cats } }, ['amount', 'currency', 'category'])],
       description: 'Only for receipts or tickets bought during the trip; null for prepaid bookings.' },
-  }, ['kind', 'title', 'summary', 'date', 'endDate', 'time', 'dayIso', 'tripN', 'bookingId', 'ref', 'place', 'price', 'people', 'todos', 'notes', 'confidence', 'isIdDocument', 'todoId', 'expense']);
+  }, ['kind', 'title', 'summary', 'date', 'endDate', 'time', 'dayIso', 'tripN', 'bookingId', 'ref', 'place', 'price', 'people', 'todos', 'notes', 'facts', 'transcript', 'confidence', 'isIdDocument', 'todoId', 'expense']);
 }
 
 const CLASSIFY_SYSTEM = `You file travel documents for a couple's trip app (the trip days, bookings and to-dos are given below). Read the attached document (a PDF, photo or screenshot of a ticket, booking, voucher or receipt) and describe it in the JSON format requested, in English.
@@ -874,7 +877,7 @@ const CLASSIFY_SYSTEM = `You file travel documents for a couple's trip app (the 
 - Never copy passport numbers, ID-card numbers, dates of birth, PINs or card numbers into any field.
 - If the document is unreadable or unrelated, use kind other and a confidence of 0.3 or less.`;
 
-function classifyPrompt(C, name, today) {
+function classifyPrompt(C, name, today, needText = false) {
   const days = C?.days || [], B = C?.bookings || [], cats = C?.money?.categories || CATEGORIES;
   const open = (C?.todos || []).filter((t) => !t.done && !(t.expires && today && t.expires.slice(0, 10) < today));
   return [
@@ -888,6 +891,7 @@ function classifyPrompt(C, name, today) {
     'OPEN TO-DOS (id · due · title):',
     ...(open.length ? open.map((t) => `${t.id} · ${t.due || ''} · ${S(t.title)}`) : ['none']),
     `MONEY CATEGORIES: ${cats.join(', ')}`,
+    `TRANSCRIPT: ${needText ? 'needed (the phone could not read the text of this file)' : 'not needed (leave it empty)'}`,
     'Describe the attached document.',
   ].filter(Boolean).join('\n');
 }
@@ -961,6 +965,8 @@ export function cleanProposal(raw = {}, C = {}, { today = null } = {}) {
     people: Number.isInteger(r.people) && r.people > 0 && r.people < 50 ? r.people : null,
     todos: (Array.isArray(r.todos) ? r.todos : []).slice(0, 5).map((x) => ({ title: t(x?.title, 100), due: isIso(x?.due) ? x.due : null, time: hm(x?.time) })).filter((x) => x.title),
     notes: (Array.isArray(r.notes) ? r.notes : []).filter((n) => !piiText(S(n))).map((n) => t(n, 140)).filter(Boolean).slice(0, 4),
+    facts: (Array.isArray(r.facts) ? r.facts : []).filter((n) => !piiText(S(n))).map((n) => t(n, 160)).filter(Boolean).slice(0, 10),
+    transcript: T(dropPii(r.transcript)).slice(0, 3000),
     confidence: Math.max(0, Math.min(1, Number(r.confidence) || 0)),
     isIdDocument: kind === 'id' || r.isIdDocument === true, todoId: null, expense: null, source: 'ai',
   };
@@ -992,7 +998,7 @@ export async function classifyDocument({ apiKey, model, file, content, today = n
     let legacy = false;
     const body = () => ({
       systemInstruction: { parts: [{ text: CLASSIFY_SYSTEM }] },
-      contents: [{ role: 'user', parts: [attPart(a), { text: privacy(classifyPrompt(C, a.name, today), C) }] }],
+      contents: [{ role: 'user', parts: [attPart(a), { text: privacy(classifyPrompt(C, a.name, today, !S(file?.text)), C) }] }],
       generationConfig: { maxOutputTokens: 8192, thinkingConfig: { thinkingLevel: 'LOW' },
         ...(legacy ? { responseMimeType: 'application/json', responseJsonSchema: schema } : { responseFormat: { text: { mimeType: 'application/json', schema } } }) },
       store: false,

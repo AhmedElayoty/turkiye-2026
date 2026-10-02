@@ -308,6 +308,13 @@ function syncNow() {
         if (out?.data) await adopt(state.cloudMod.merge(state.mine, out.data));
         setSync('ok');
       } else setSync(r.data ? 'read' : 'local');
+      // keep every document on this phone too, so it opens offline (the other phone's uploads come down once)
+      for (const u of state.udocs) {
+        if (!navigator.onLine || !state.key) break;
+        if (await idbGet('udoc:' + u.id)) continue;
+        try { await userBytes(u.id); } catch (e) { console.warn('prefetch', u.id, e?.message); }
+      }
+      if (aiReady() && canSeal()) await enrichDocs();
     } catch (e) {
       console.warn('sync', e);
       const fe = state.cloudMod?.friendlyCloudError?.(e) || { code: 'other', message: String(e.message || e) };
@@ -315,6 +322,20 @@ function syncNow() {
     } finally { syncing = null; }
   })();
   return syncing;
+}
+// documents added offline (or before the AI read key facts) are read once: the facts let the offline helper answer from them
+async function enrichDocs() {
+  let n = 0;
+  for (const u of state.udocs.slice()) {
+    if (n >= 3 || !navigator.onLine || !aiReady()) break;
+    if ((u.facts && u.facts.length) || u.isIdDocument || (u.enrichTry && Date.now() - u.enrichTry < 864e5)) continue;
+    n++;
+    try {
+      const bytes = await userBytes(u.id), api = await aiApi(), I = await intakeMod();
+      const p = await api.classifyDocument({ apiKey: state.ai.key, model: state.ai.model, file: { mime: u.mime, base64: I.toBase64(bytes), name: u.name, text: u.text || '' }, content: C(), today: todayISO() });
+      putDoc({ ...u, facts: p.facts || [], summary: u.summary || p.summary || '', notes: u.notes?.length ? u.notes : (p.notes || []), text: u.text || p.transcript || '', enrichTry: Date.now() });
+    } catch (e) { console.warn('enrich', u.id, e?.message); putDoc({ ...u, enrichTry: Date.now() }); }
+  }
 }
 function syncLineHtml() {
   const s = state.sync || {}, ago = s.at ? Math.max(0, Math.round((Date.now() - s.at) / 60000)) : null, when = ago == null ? '' : ago < 1 ? 'just now' : `${ago} min ago`;
@@ -662,7 +683,8 @@ const ctx = () => {
   const t = todayISO(), ds = C().days;
   return { content: C(), today: t, todayInTrip: t >= ds[0].date && t <= ds[ds.length - 1].date ? t : null, nowMin: nowMin(), expenses: state.expenses, rate: state.rate,
            todosDone: Object.fromEntries(C().todos.map(x => [x.id, isDone(x)])),
-           userDocs: state.udocs.map(({ text, ...u }) => u), userNotes: state.notes, progress: state.progress };
+           userDocs: state.udocs.map(({ text, ...u }) => ({ ...u, text: String(text || '').slice(0, 2500) })), userNotes: state.notes, progress: state.progress,
+           prev: state.prevOffline || null };   // the last offline answer, for follow-ups ("and tomorrow?")
 };
 function viewAsk() {
   if (!state.chat.length) state.chat.push({ res: answer('hi', ctx()) });
@@ -745,7 +767,7 @@ async function send(text) {
   renderChat();
   await new Promise(r => setTimeout(r, 300));
   let res;
-  try { res = answer(q, ctx()); } catch (e) { console.error(e); res = { title: 'Sorry, I got confused', blocks: [{ t: 'p', text: 'Try asking another way, for example “plan for tomorrow” or “ferry times”.' }] }; }
+  try { res = answer(q, ctx()); state.prevOffline = { q, intent: res.intent || null, date: res.date || null, subject: res.subject || null, title: res.title || '' }; } catch (e) { console.error(e); res = { title: 'Sorry, I got confused', blocks: [{ t: 'p', text: 'Try asking another way, for example “plan for tomorrow” or “ferry times”.' }] }; }
   state.chat[state.chat.length - 1] = { res };
   renderChat();
   if (res.autoPdf && res.pdf) { const i = state.chat.length - 1; await exportPdf(res.pdf, $(`[data-chatpdf="${i}"]`)); if (state.chat[i]) { state.chat[i].autoDone = true; renderChat(false); } }
@@ -836,7 +858,11 @@ function aiHandlers() {
       if (Array.isArray(p.notes)) x.notes = p.notes.slice(0, 6).map(String);
       putDoc(x); return { ok: true, id: x.id };
     },
-    read_document: ({ id } = {}) => { const x = u(id); return { ...x, text: x.text || '(a photo: no text was extracted on the phone)' }; },
+    read_document: ({ id } = {}) => {
+      const fid = String(id || '').replace(/^u:/, ''), facts = C().docFacts?.[fid];
+      if (facts && !udocBy(fid)) { const f = C().files.find(x => x.id === fid); return { id: fid, title: f?.title || fid, facts }; }   // a trip document, read at build time
+      const x = u(id); return { ...x, text: x.text || '(a photo: no text was extracted on the phone)' };
+    },
     list_documents: () => state.udocs.map(({ text, ...x }) => x),
   };
 }
@@ -1041,7 +1067,7 @@ function docMsgHtml(m, i) {
   return `<div class="msg bot" data-msg="${i}"><h4>${ico(kindIcon(u.kind), 'sm')} Saved: ${esc(u.title)}</h4><p class="b-p">${esc(where)}</p>${u.summary ? `<p class="small" dir="auto">${esc(u.summary)}</p>` : ''}${m.extra ? `<p class="small">${esc(m.extra)}</p>` : ''}
     <div class="msg-actions"><button class="btn sm primary" data-doc="u:${esc(u.id)}">${ico('filetext', 'sm')} Open</button>${u.dayIso ? `<a class="btn sm ghost" href="#day/${u.dayIso}">${ico('days', 'sm')} ${esc(dateLabel(u.dayIso))}</a>` : ''}<button class="btn sm ghost" data-udoc-edit="${esc(u.id)}">${ico('pencil', 'sm')} Change</button></div></div>`;
 }
-const PROP_KEYS = ['kind', 'title', 'summary', 'date', 'endDate', 'time', 'dayIso', 'tripN', 'bookingId', 'ref', 'place', 'price', 'people', 'notes', 'confidence', 'isIdDocument', 'source', 'todoId'];
+const PROP_KEYS = ['kind', 'title', 'summary', 'date', 'endDate', 'time', 'dayIso', 'tripN', 'bookingId', 'ref', 'place', 'price', 'people', 'notes', 'facts', 'confidence', 'isIdDocument', 'source', 'todoId'];
 const pickProp = (p) => Object.fromEntries(PROP_KEYS.map(k => [k, p[k] ?? null]));
 const isAudio = (f) => /^audio\//.test(f.type || '') || /\.(opus|ogg|oga|m4a|mp3|wav|aac|amr|caf)$/i.test(f.name || '');
 async function ingestFile(file, { from = 'docs', dayHint = null } = {}) {
@@ -1080,6 +1106,7 @@ async function ingestFile(file, { from = 'docs', dayHint = null } = {}) {
       } catch (e) { console.warn(e); prop = null; try { why = (await aiApi()).friendlyError(e).message; } catch { why = 'The AI could not read it.'; } }
     }
     if (!prop) prop = I.classifyText(text, C(), { filename: file.name, today: todayISO() });
+    if (!text && prop.transcript) text = String(prop.transcript);   // a photo or scan: the AI wrote down its text
     prop = { ...pickProp(prop), todos: Array.isArray(prop.todos) ? prop.todos.slice(0, 4) : [], expense: prop.expense || null };
     if (!prop.dayIso && dayHint && !['insurance', 'id'].includes(prop.kind)) { prop.dayIso = dayHint; prop.tripN = null; }
     if (!prop.title) prop.title = kindLabel(prop.kind);
@@ -1625,7 +1652,7 @@ async function act(a, el) {
     case 'forget': if (confirm('Forget the passphrase on this phone? You will need to type it again.')) lockNow(true); break;
     case 'reset-todos': if (confirm('Untick every to-do, on every phone?')) { for (const t of C().todos) if (isDone(t)) setDone(t.id, false); render(); } break;
     case 'reset-exp': if (confirm('Delete every logged expense, on every phone? This cannot be undone.')) { for (const e of state.expenses) delExpense(e.id); render(); } break;
-    case 'reset-chat': state.chat = []; state.aiHistory = []; toast('Chat cleared'); break;
+    case 'reset-chat': state.chat = []; state.aiHistory = []; state.prevOffline = null; toast('Chat cleared'); break;
     case 'add-doc': pickFile(route().a === 'ask' ? 'chat' : 'docs', el.dataset.iso || null); break;
     case 'note-add': if (await ensureWriteKey()) openNoteSheet(el.dataset.iso); break;
     case 'todo-add': openTodoSheet(); break;
