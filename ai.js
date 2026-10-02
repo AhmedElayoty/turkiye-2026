@@ -228,7 +228,7 @@ function pacificReset() {   // RPD quotas reset at midnight Pacific time
 }
 const soon = new Map();   // per-minute limits: when Google says that model can be asked again
 const rest = (id, e) => {
-  if (isDaily(e)) soon.delete(id);   // out for the day: never the one to wait for
+  if (isDaily(e) || e?.slow) soon.delete(id);   // out for the day (or just slow): never the one to wait for
   else if (e?.status === 429) soon.set(id, Date.now() + Math.max(3, e.retryAfter || 20) * 1000);
   else if (e?.status >= 500 && !e?.slow) soon.set(id, Date.now() + 5000);   // "high demand": usually gone in seconds
   tired.set(id,isDaily(e) ? pacificReset() : e?.status === 429 ? Date.now() + Math.max(20, e?.retryAfter || 0) * 1000 : Date.now() + 10 * 60 * 1000);
@@ -251,7 +251,7 @@ const sleep = (ms, signal) => new Promise((res, rej) => {
 });
 async function withFallback(st, fn, canSwitch = () => true) {
   for (;;) {
-    try { return await fn(st.M); } catch (e) {
+    try { const r = await fn(st.M); soon.delete(st.M.id); return r; } catch (e) {
       if (!switchable(e)) throw e;
       rest(st.M.id, e);
       let to = st.M.lighter ? pick(st.M.lighter) : null;
@@ -671,7 +671,7 @@ async function tavily(q, ctx, site = null) {
   }
   ctx.usage.webSearches += 1;
   // closed days the search states for the searched place itself (its name in the same sentence): the answer must not drop them
-  const kw = keyWords(q.replace(/\b(opening|hours|open|closed|days?|times?|official|site|today|address|where)\b/gi, ' '));
+  const kw = keyWords(q.replace(/\b(opening|hours|open|closed|days?|times?|official|site|today|address|where|tickets?|prices?|costs?|fees?|entry|entrance|admission|visit(?:ing)?|last|weekend|weekdays?|january|february|march|april|may|june|july|august|september|october|november|december|20\d\d)\b/gi, ' '));
   for (const sent of S(j.answer).split(/[.!?]\s+/)) {   // no lookbehind: older iPhones cannot parse it
     if (!kw.length || !nameOK(kw, [sent])) continue;
     for (const m of sent.matchAll(/(?:closed|except)\s+(?:on\s+|every\s+|all\s+)?(mon|tues|wednes|thurs|fri|satur|sun)days?\b/gi)) ctx.out.closed?.add(m[1].toLowerCase());
@@ -729,7 +729,7 @@ function timesIn(s) {
   for (const m of t.matchAll(/\b(noon|midnight)\b/gi)) at.push([m.index, /noon/i.test(m[1]) ? 720 : 0]);
   at.sort((a, b) => a[0] - b[0]);
   const out = new Set();
-  for (let i = 0; i < at.length; i++) for (let j = i + 1; j < at.length && at[j][0] - at[i][0] <= 60; j++) out.add(`${at[i][1]}-${at[j][1]}`);
+  for (let i = 0; i < at.length; i++) for (let j = i + 1; j < at.length && at[j][0] - at[i][0] <= 120; j++) out.add(`${at[i][1]}-${at[j][1]}`);
   return out;
 }
 const RANGE = /\b([01]?\d|2[0-4])[:.]([0-5]\d)\s*(?:–|—|-|to|until|till)\s*([01]?\d|2[0-4])[:.]([0-5]\d)\b/gi;
@@ -1219,7 +1219,13 @@ export async function chatTurn({ apiKey, model, webSearch = false, searchKey = n
   const placeTurn = out.seen.length && contents.slice(start).some((c) => (c.parts || []).some((p) => ['web_search', 'place_fit'].includes(p.functionCall?.name)));
   if (text && placeTurn && !(atts.length && !/Screenshot shows:/.test(question))) {
     const known = timesIn([sys, question, ...out.seen].join('\n'));
-    const loose = [...text.matchAll(RANGE)].filter((m) => !known.has(`${hhmm(m[1], m[2])}-${hhmm(m[3], m[4])}`)).map((m) => m[0].replace(/\s+/g, ' '));
+    // only ranges written as opening hours ("open 10:00–18:00", "Saturday: 11:00–20:00"), not a visit slot ("you would be there 11:00–12:30") or a plan time
+    const hoursLike = (m) => {
+      const before = text.slice(Math.max(0, m.index - 45), m.index), line = text.slice(text.lastIndexOf('\n', m.index) + 1, m.index);
+      if (/(be there|you('d| would| will)|arriv|leave|visit(ing)? (slot|time|window)|spend|stay|ferry|taxi|walk|shuttle|flight|plan)/i.test(before)) return false;
+      return /(open|opens|opening|hours|closes|closing|daily|every day|last entry|admission|(mon|tues|wednes|thurs|fri|satur|sun)day|mon|tue|wed|thu|fri|sat|sun|weekdays?|weekends?|مفتوح|ساعات|أوقات|يفتح|يغلق)/i.test(before || line);
+    };
+    const loose = [...text.matchAll(RANGE)].filter((m) => hoursLike(m) && !known.has(`${hhmm(m[1], m[2])}-${hhmm(m[3], m[4])}`)).map((m) => m[0].replace(/\s+/g, ' '));
     if (loose.length) {
       const ar = /[؀-ۿ]/.test(text), list = [...new Set(loose)].slice(0, 4).join(', ');
       fresh = false; emit(ar ? `\n\n**تنبيه:** لم أجد ${list} في المصادر التي راجعتها؛ تأكد من صفحة المكان على خرائط جوجل أو اتصل بهم قبل الذهاب.`
