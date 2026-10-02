@@ -1157,12 +1157,17 @@ async function ingestFile(file, { from = 'docs', dayHint = null } = {}) {
     }
     // a screenshot of a place (Google Maps, Instagram …) sent in the chat is a question about that place, not a document to file
     if ((chat || from === 'share') && prop?.placeListing && f.type === 'image' && aiReady() && !state.aiBusy) {
+      // other files shared together wait until this answer is done (so the chat is not left mid-answer)
+      const held = from === 'share' ? (state.inbox || []).splice(0) : [];
       if (chat) { const i = state.chat.indexOf(chat); if (i >= 0) state.chat.splice(i, 1); const me = state.chat[state.chat.length - 1]; if (me?.me) me.text = `📍 ${prop.place || 'A place'} (screenshot)`; }
-      else { closeSheet(); if (route().a !== 'ask') { go('#ask'); await new Promise(r => setTimeout(r, 200)); } state.chat.push({ me: true, text: `📍 ${prop.place || 'A place'} (screenshot)` }); }
+      else { if (route().a !== 'ask') { go('#ask'); await new Promise(r => setTimeout(r, 200)); } else closeSheet(); state.chat.push({ me: true, text: `📍 ${prop.place || 'A place'} (screenshot)` }); }
       const box = $('#chatInput'), typed = (box?.value || '').trim(); if (box) box.value = '';
-      const seen = [prop.place, ...(prop.facts || [])].filter(Boolean).join('; ');
-      return sendAi(`${typed || 'Where is this place, which trip day fits it best (after which stop), and is it open then?'}${seen ? `\n\nScreenshot shows: ${seen}` : ''}`,
+      // everything read from the picture goes along as text too (the hours check and "Try again" use it)
+      const seen = [prop.place, ...(prop.facts || []), prop.transcript && String(prop.transcript).slice(0, 1500)].filter(Boolean).join('; ');
+      await sendAi(`${typed || 'Where is this place, which trip day fits it best (after which stop), and is it open then?'}${seen ? `\n\nScreenshot shows: ${seen}` : ''}`,
         { echo: !!typed, shown: typed, attachments: [{ name: f.name, mime: f.mime, base64: I.toBase64(f.bytes) }] });
+      if (held.length) { state.inbox = held; nextShared(); }
+      return;
     }
     if (!prop) prop = I.classifyText(text, C(), { filename: file.name, today: todayISO() });
     if (!text && prop.transcript) text = String(prop.transcript);   // a photo or scan: the AI wrote down its text
@@ -1720,7 +1725,7 @@ async function act(a, el) {
     case 'forget': if (confirm('Forget the passphrase on this phone? You will need to type it again.')) lockNow(true); break;
     case 'reset-todos': if (confirm('Untick every to-do, on every phone?')) { for (const t of C().todos) if (isDone(t)) setDone(t.id, false); render(); } break;
     case 'reset-exp': if (confirm('Delete every logged expense, on every phone? This cannot be undone.')) { for (const e of state.expenses) delExpense(e.id); render(); } break;
-    case 'reset-chat': if (confirm('Clear the whole chat on this phone?')) { clearTimeout(chatSaveT); state.chat = []; state.aiHistory = []; state.prevOffline = null; await idbDel('chat'); toast('Chat cleared'); } break;
+    case 'reset-chat': if (confirm('Clear the whole chat on this phone?')) { try { state.aiBusy?.abort(); } catch {} clearTimeout(chatSaveT); state.chat = []; state.aiHistory = []; state.prevOffline = null; await idbDel('chat'); toast('Chat cleared'); } break;
     case 'add-doc': pickFile(route().a === 'ask' ? 'chat' : 'docs', el.dataset.iso || null); break;
     case 'note-add': if (await ensureWriteKey()) openNoteSheet(el.dataset.iso); break;
     case 'todo-add': openTodoSheet(); break;

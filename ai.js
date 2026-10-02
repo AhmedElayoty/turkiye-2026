@@ -228,7 +228,8 @@ function pacificReset() {   // RPD quotas reset at midnight Pacific time
 }
 const soon = new Map();   // per-minute limits: when Google says that model can be asked again
 const rest = (id, e) => {
-  if (e?.status === 429 && !isDaily(e)) soon.set(id, Date.now() + Math.max(3, e.retryAfter || 20) * 1000);
+  if (isDaily(e)) soon.delete(id);   // out for the day: never the one to wait for
+  else if (e?.status === 429) soon.set(id, Date.now() + Math.max(3, e.retryAfter || 20) * 1000);
   else if (e?.status >= 500 && !e?.slow) soon.set(id, Date.now() + 5000);   // "high demand": usually gone in seconds
   tired.set(id,isDaily(e) ? pacificReset() : e?.status === 429 ? Date.now() + Math.max(20, e?.retryAfter || 0) * 1000 : Date.now() + 10 * 60 * 1000);
   try { if (typeof localStorage !== 'undefined') localStorage.setItem('tr26.ai_tired', JSON.stringify([...tired].filter(([, t]) => t > Date.now()))); } catch {}
@@ -664,7 +665,10 @@ async function tavily(q, ctx, site = null) {
   const j = await r.json().catch(() => ({}));
   // http pages (some official sites still are) are read too; only https ones become link buttons
   const sources = (j.results || []).filter((x) => /^https?:\/\//.test(x.url || '')).slice(0, 5).map((x) => ({ title: S(x.title) || 'source', url: x.url, text: cut(x.content, 700) }));
-  if (site && !sources.length) return tavily(q, ctx);   // nothing on that site: the whole web
+  if (site && !sources.length) {   // nothing on that site: the whole web (and the model is told so)
+    ctx.usage.webSearches += 1;
+    return { siteHadNothing: `${site} has nothing on this; these results are from the whole web`, ...(await tavily(q, ctx)) };
+  }
   ctx.usage.webSearches += 1;
   // closed days the search states for the searched place itself (its name in the same sentence): the answer must not drop them
   const kw = keyWords(q.replace(/\b(opening|hours|open|closed|days?|times?|official|site|today|address|where)\b/gi, ' '));
@@ -1034,7 +1038,7 @@ function compact(contents, start, names, webTurns) {
     const parts = c.parts.map((p) => {
       if (p.inlineData) {
         changed = true; const isImg = /^image\//.test(p.inlineData.mimeType || ''), nm = S((i === start && names[k]) || (isImg ? 'photo' : 'document')).replace(/"/g, "'"); k++;
-        return { text: `[${isImg ? 'image' : 'document'} "${nm}" — already read and filed]` };
+        return { text: `[${isImg ? 'image' : 'document'} "${nm}" — already read earlier in this chat]` };
       }
       if (typeof p.text === 'string' && p.text.startsWith('<app_state>') && !p.text.includes('\n(older snapshot shortened)\n')) {
         changed = true; return { text: `<app_state>\n${p.text.split('\n')[1] || ''}\n(older snapshot shortened)\n</app_state>` };

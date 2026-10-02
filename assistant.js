@@ -158,7 +158,7 @@ function wordsFor(content) {
 function fixTypos(q, content, extra = null) {
   const { vocab, known } = wordsFor(content);
   return q.split(' ').map(w => {
-    if (Object.hasOwn(TYPOS, w)) return TYPOS[w];
+    if (Object.prototype.hasOwnProperty.call(TYPOS, w)) return TYPOS[w];   // (Object.hasOwn needs iOS 15.4)
     if (w.length < 5 || !/^[a-z]+$/.test(w) || known.has(w) || COMMON.has(w) || extra?.has(w)) return w;
     const max = w.length <= 6 ? 1 : 2;
     let best = null, bd = max + 1, ties = 0;
@@ -333,7 +333,7 @@ function bestSentence(q, ctx) {
   }
   for (const u of userDocs(ctx)) {
     [u.summary, ...(u.notes || []), ...(u.facts || [])].forEach(x => push(x, u.title));
-    String(u.text || '').split(/(?<=[.!?])\s+|\n+/).map(x => x.trim()).filter(x => x.length >= 12 && x.length <= 240).slice(0, 80).forEach(x => push(x, u.title));
+    String(u.text || '').replace(/([.!?])\s+|\n+/g, (m, p) => (p || '') + '\u0001').split('\u0001').map(x => x.trim()).filter(x => x.length >= 12 && x.length <= 240).slice(0, 80).forEach(x => push(x, u.title));
   }
   let best = null;
   const res = words.map(w => [w, wordRe(w)]);
@@ -1498,7 +1498,7 @@ function phrasesAnswer(raw, ctx) {
         bathroom: 'toilet', wc: 'toilet', restroom: 'toilet', booking: 'reservation', reserved: 'reservation', view: 'sea-view', sugar: 'sugar', help: 'help', meter: 'meter', stop: 'stop' };
       const near = P2.filter(p => want.split(' ').some(w => REL[w] && norm(p.en).includes(norm(REL[w]))));
       const tip = /(change|tip|tips)/.test(want) && ctx.content.tips.sections.flatMap(s => s.items).find(x => /^tip\b/i.test(x));
-      missing = `“${cap(want)}” is not in your phrase list${near.length ? `. Closest: ${near.slice(0, 2).map(p => `“${p.tr}” (${p.en})`).join(', ')}` : ''}${tip ? `; ${lcFirst(String(tip).split(/(?<=\.)\s+/)[0]).replace(/\.$/, '')} (optional)` : ''}.`;
+      missing = `“${cap(want)}” is not in your phrase list${near.length ? `. Closest: ${near.slice(0, 2).map(p => `“${p.tr}” (${p.en})`).join(', ')}` : ''}${tip ? `; ${lcFirst(String(tip).replace(/(\.)\s+/g, '$1' + '\u0001').split('\u0001')[0]).replace(/\.$/, '')} (optional)` : ''}.`;
       if (near.length) list = near;
     }
   } else {   // "the restaurant added service charge, what do I say": the phrase whose words the question uses
@@ -1594,7 +1594,7 @@ function tipsAnswer(q, ctx) {
   const TSYN = { wear: ['covered', 'headscarf', 'shoulders'], dress: ['covered', 'headscarf', 'shoulders'], cold: ['°c', 'night', 'layer'], warm: ['°c'], tip: ['tip'], tips: ['tip'], tipping: ['tip'], weather: ['°c'] };
   const ws = q.split(' ').filter(w => w.length >= 3 && !STOP.has(w)).flatMap(w => [w, ...(TSYN[w] || [])]);
   const it = one && (one.items.map((x, i) => ({ x, i, n: ws.filter(w => new RegExp(`(^|[^\\p{L}])${reEsc(w)}(?![\\p{L}])`, 'u').test(norm(x)) || (w.length > 4 && norm(x).includes(w))).length })).sort((a, b) => b.n - a.n || a.i - b.i)[0]?.x || one.items[0]);
-  return { title: one ? one.title : 'Tips & rules', blocks, quick: it && !/(sunset|غروب)/.test(q) ? String(it).split(/(?<=\.)\s+/).slice(0, 2).join(' ') : null, actions: [{ act: 'pdf', label: 'Download PDF', icon: 'download' }],
+  return { title: one ? one.title : 'Tips & rules', blocks, quick: it && !/(sunset|غروب)/.test(q) ? String(it).replace(/(\.)\s+/g, '$1' + '\u0001').split('\u0001').slice(0, 2).join(' ') : null, actions: [{ act: 'pdf', label: 'Download PDF', icon: 'download' }],
            pdf: { title: one ? one.title : 'Tips & rules', subtitle: ctx.content.meta.title, blocks, filename: `${filePrefix(ctx)}-tips${one ? '-' + one.id : ''}.pdf` } };
 }
 
@@ -1637,7 +1637,7 @@ function docQaAnswer(q, u, ctx) {
   const named = new Set(norm(`${u.title} ${u.place || ''} ${UKIND[u.kind] || ''} ticket document voucher booking`).split(' '));
   const ask = q.split(' ').filter(w => w.length >= 3 && !STOP.has(w) && !named.has(w));
   const stem = (w) => new RegExp(`(^|[^\\p{L}])${w.slice(0, Math.max(4, w.length - 2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u');
-  const pool = [...(u.facts || []), ...(u.notes || []), u.summary, ...String(u.text || '').split(/(?<=[.!?])\s+|\n+/)].map(x => String(x || '').trim()).filter(x => x.length >= 8 && x.length <= 300);
+  const pool = [...(u.facts || []), ...(u.notes || []), u.summary, ...String(u.text || '').replace(/([.!?])\s+|\n+/g, (m, p) => (p || '') + '\u0001').split('\u0001')].map(x => String(x || '').trim()).filter(x => x.length >= 8 && x.length <= 300);
   let best = null;
   for (const s of pool) { const n = norm(s), hit = ask.filter(w => stem(w).test(n)).length, sc = hit - s.length / 1000; if (hit && (!best || sc > best.sc)) best = { s, sc }; }
   const blocks = [best ? CALL(best.s, 'sea', `From “${u.title}”`) : CALL(`“${u.title}” does not say that in what was read from it. Open it to check.`, 'gold')];
@@ -2009,7 +2009,7 @@ function distanceAnswer(m, q, ctx) {
 /* ───────────── paying, the time difference, money left ───────────── */
 function payAnswer(q, ctx) {
   const C = ctx.content, pool = [...C.tips.sections.flatMap(s => s.items), ...C.transport.taxi, ...C.transport.card];
-  const tipL = (pool.find(x => /^tip\b/i.test(x)) || '').split(/(?<=\.)\s+/)[0].replace(/\.$/, '');   // the content's own tipping rule
+  const tipL = (pool.find(x => /^tip\b/i.test(x)) || '').replace(/(\.)\s+/g, '$1' + '\u0001').split('\u0001')[0].replace(/\.$/, '');   // the content's own tipping rule
   // "do we need cash today": the day's taxis, ticketed sights (card only) and bazaars (cash)
   const day = /(^|\s)(today|tonight|tomorrow)(\s|$)/.test(q) && dayAt(ctx, /tomorrow/.test(q) ? isoAdd(ctx.today, 1) : ctx.todayInTrip);
   if (day) {
@@ -2513,7 +2513,7 @@ function venueBook(v, ctx) {
 }
 // the booking sentence that answers a detail ("do we get it back?" → the deposit line)
 function bookingSentence(b, q) {
-  const pool = [b.cancel, b.board, ...(Array.isArray(b.notes) ? b.notes : [b.notes])].filter(Boolean).flatMap(x => String(x).split(/(?<=\.)\s+/));
+  const pool = [b.cancel, b.board, ...(Array.isArray(b.notes) ? b.notes : [b.notes])].filter(Boolean).flatMap(x => String(x).replace(/(\.)\s+/g, '$1' + '\u0001').split('\u0001'));
   const ws = q.split(' ').filter(w => w.length >= 4 && !STOP.has(w)), syn = { back: ['back', 'refund', 'return'], deposit: ['deposit'], refund: ['refund', 'back'] };
   let best = null, bs = 0;
   for (const s of pool) { const n = norm(s), sc = ws.reduce((a, w) => a + ((syn[w] || [w]).some(x => n.includes(x)) ? 1 : 0), 0); if (sc > bs) { best = s; bs = sc; } }
@@ -2561,9 +2561,9 @@ function planFrom(w, d) {
 }
 function transportSmart(q, date, ctx, { boatQ }) {
   const C = ctx.content, T = C.transport, iso = date || ctx.todayInTrip, d = dayAt(ctx, iso), now = ctx.nowMin ?? 0;
-  const taxiLine = (re) => T.taxi.find(x => re.test(x)), sentence = (s, re) => String(s || '').split(/(?<=\.)\s+/).find(x => re.test(x)) || '';
+  const taxiLine = (re) => T.taxi.find(x => re.test(x)), sentence = (s, re) => String(s || '').replace(/(\.)\s+/g, '$1' + '\u0001').split('\u0001').find(x => re.test(x)) || '';
   if (TAXIQ.test(q) && /(extra|surcharge|night|scam|overcharg|allowed|cheat|more money|نصب|زياده)/.test(q)) {   // "the driver wants extra for night"
-    const l = taxiLine(/night tariff|surcharge|scam/i), ss = String(l || '').split(/(?<=\.)\s+/);
+    const l = taxiLine(/night tariff|surcharge|scam/i), ss = String(l || '').replace(/(\.)\s+/g, '$1' + '\u0001').split('\u0001');
     const lead = [...ss.filter(x => /(night|surcharge|scam|toll)/i.test(x)), ...ss.filter(x => !/(night|surcharge|scam|toll)/i.test(x))].join(' ');
     return l ? { quick: `${/(allowed|legal|ok|okay|is that|can they|should we)/.test(q) ? 'No: ' : ''}${lead} ${sentence(taxiLine(/taksimetre/i), /taksimetre/i)}`.trim() } : null;
   }
@@ -2646,7 +2646,7 @@ function payLine(q, to, ctx) {
   const pay = payAnswer(TAXIQ.test(q) ? 'taxi' : q, ctx).quick || '';
   const s = (ctx.content.sights || []).find(x => aliasScore(to.n, sightNames(x)) > 0);
   const mus = s && /(€|₺)\s?\d/.test(s.price || '') && ctx.content.tips.sections.flatMap(x => x.items).find(x => /refuse cash/i.test(x));
-  return `Paying: ${pay}${mus ? ` ${String(mus).split(/(?<=\.)\s+/)[0]}` : ''}`;
+  return `Paying: ${pay}${mus ? ` ${String(mus).replace(/(\.)\s+/g, '$1' + '\u0001').split('\u0001')[0]}` : ''}`;
 }
 
 /* ───────────── round 2: what the question really asks (party size, a clock time, yes/no) ───────────── */
@@ -2672,7 +2672,7 @@ const FACTS = new WeakMap();
 const monIdx = (s) => MON.findIndex(m => m.toLowerCase() === String(s || '').slice(0, 3).toLowerCase());
 // "01:30 on Sat 10 Oct" → { iso: '2026-10-10', min: 90 }
 const whenOn = (s, y) => { const m = /(\d{1,2}:\d{2})\)?\s+on\s+(?:[A-Z][a-z]{2}\s+)?(\d{1,2})\s+([A-Z][a-z]{2})/.exec(s || ''); return m && monIdx(m[3]) >= 0 ? { iso: `${y}-${pad2(monIdx(m[3]) + 1)}-${pad2(+m[2])}`, min: toMin(m[1]) } : null; };
-const sentences = (...xs) => xs.flat().filter(Boolean).flatMap(x => String(x).split(/(?<=[.!?])\s+/)).filter(Boolean);
+const sentences = (...xs) => xs.flat().filter(Boolean).flatMap(x => String(x).replace(/([.!?])\s+/g, '$1' + '\u0001').split('\u0001')).filter(Boolean);
 const legPt = (s) => { const m = /^([A-Z]{3})(?:\s+(T\d))?\s+(\d{1,2}:\d{2})/.exec(s || ''); return m ? { code: m[1], term: m[2] || '', at: m[3], min: toMin(m[3]) } : null; };
 const lcFirst = (x) => x ? x.charAt(0).toLowerCase() + x.slice(1) : '';
 function factsFor(C) {
@@ -2960,7 +2960,7 @@ function sanityAns(a) {
   if (!pick || pick.costLow == null) return null;
   const lo = pick.costLow, hi = pick.costHigh || lo, rng = `₺${fmt(lo)}${hi !== lo ? '–' + fmt(hi) : ''}`, amt = `₺${fmt(tl)}`;
   const rule = C.tips.sections.flatMap(s => s.items).find(x => /service charges?/i.test(x) && /(illegal|banned)/i.test(x));
-  const tail = rule ? ` Just check there is no service-charge line: ${lcFirst(String(rule).split(/(?<=\.)\s+/)[0])}` : '';
+  const tail = rule ? ` Just check there is no service-charge line: ${lcFirst(String(rule).replace(/(\.)\s+/g, '$1' + '\u0001').split('\u0001')[0])}` : '';
   const quick = tl <= hi * 1.05 ? `Yes — ${amt} is ${tl >= lo * 0.95 ? 'inside' : 'below'} the ${rng} plan for the ${pick.name} ${(KIND[pick.kind] || pick.kind).toLowerCase()} for two (≈ AED ${fmt(tl / rate)}).${tail}`
     : `That is above the ${rng} plan for ${pick.name} by about ₺${fmt(tl - hi)}: ask for the itemised bill and check every line.${tail}`;
   return Object.assign(venueAnswer(pick, ctx, ''), { quick, intent: 'venue', date: pick.day, subject: { kind: 'venue', id: pick.id } });
@@ -3440,7 +3440,7 @@ function compound(q, ctx) {
   const l0 = lineOf(r0), l1 = lineOf(r1), l2 = lineOf(r2);
   const offDay = r2.date && r1.date && r2.date !== r1.date && !DATE_TOK.test(b);
   DATE_TOK.lastIndex = 0;
-  const first = (x) => String(x).split(/(?<=[.;])\s/)[0];
+  const first = (x) => String(x).replace(/([.;])\s/g, '$1' + '\u0001').split('\u0001')[0];
   if (!l2 || UNSURE.test(r2.title || '') || r2.intent === 'search' || (offDay && !UNSURE.test(r0.title || '')) || covers(l0, first(l2))) return r0;
   const base = (covers(l0, l1) && !UNSURE.test(r0.title || '')) || UNSURE.test(r1.title || '') ? r0 : r1, lb = lineOf(base);
   if (covers(lb, first(l2))) return base;
