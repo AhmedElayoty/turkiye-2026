@@ -224,19 +224,34 @@ export function createCloud({ owner, repo, branch = 'cloud', seal, open, getToke
     return fail('other', `GitHub answered ${s}. Try again in a minute.`, x);
   }
 
-  // GET bytes: { bytes|null, anon, stale }. A dead token reads anonymously (public repo); rate limits fall back to raw
+  // GET bytes: { bytes|null, anon, stale }. A dead token reads anonymously (public repo); rate limits fall back to raw.
+  // The contents API re-encodes files it takes for text (a sealed file can look like UTF-16), so the bytes come from the
+  // git blob of the file's sha, which is always exact, and are checked against the file's size.
   async function read(path, { fresh = false, timeout = T_REQ } = {}) {
-    let tok = await token(), r = await call(urlOf(path), { tok, accept: RAW_T, timeout });
-    if (tok && r.status === 401 && !fresh) { tok = null; r = await call(urlOf(path), { accept: RAW_T, timeout }); }
+    let tok = await token(), r = await call(urlOf(path), { tok, accept: OBJ_T });
+    if (tok && r.status === 401 && !fresh) { tok = null; r = await call(urlOf(path), { accept: OBJ_T }); }
     if (r.status === 404 && !NO_REF.test(ghMsg(r)) && !EMPTY.test(ghMsg(r))) return { bytes: null, anon: !tok };
-    if (!fresh && isRate(r)) {                       // raw.githubusercontent.com: may be a few minutes old
+    const raw = async () => {                        // raw.githubusercontent.com: exact bytes, may be a few minutes old
       const w = await call(rawUrl(path), { accept: null, timeout });
       if (w.status === 404) return { bytes: null, anon: true, stale: true };
       if (!w.ok) throw fromRes(w);
       return { bytes: w.body, anon: true, stale: true };
-    }
+    };
+    if (!fresh && isRate(r)) return raw();
     if (!r.ok) throw fromRes(r);
-    return { bytes: r.body, anon: !tok };
+    const meta = jsonOf(r) || {};
+    if (!meta.sha) throw fail('other', 'GitHub answered strangely. Try again in a minute.');
+    let b = await call(`${R}/git/blobs/${meta.sha}`, { tok, accept: 'application/vnd.github.raw', timeout });
+    if (!fresh && isRate(b)) return raw();
+    if (!b.ok) throw fromRes(b);
+    if (typeof meta.size === 'number' && b.body.length !== meta.size) {   // a proxy changed it after all: the JSON form is base64
+      const j = await call(`${R}/git/blobs/${meta.sha}`, { tok, accept: JSON_T, timeout });
+      if (!j.ok) throw fromRes(j);
+      const c = String(jsonOf(j)?.content || '').replace(/\s+/g, '');
+      b = { body: Uint8Array.from(atob(c), ch => ch.charCodeAt(0)) };
+      if (b.body.length !== meta.size) throw fail('other', MSG.damaged, { reason: 'damaged' });
+    }
+    return { bytes: b.body, anon: !tok };
   }
   // HEAD: blob sha (ETag), '' when it exists but the ETag is not a sha, null when missing
   async function head(path) {
