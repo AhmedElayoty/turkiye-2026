@@ -1280,7 +1280,7 @@ const CLASSIFY_SYSTEM = `You file travel documents for a couple's trip app (the 
 - todos = only real actions the document asks for (print the voucher, check in online from …, pay the balance on arrival …). notes = at most 4 short useful facts (meeting point, what to bring, deadlines).
 - ref is a booking, confirmation, PNR, order or ticket number, or the policy number for insurance; never a passport or ID number.
 - Never copy passport numbers, ID-card numbers, dates of birth, PINs or card numbers into any field.
-- placeListing = true for a screenshot of a map or place listing (Google Maps, Apple Maps, an Instagram profile, a TripAdvisor or Foursquare page) that shows a place's name, address or opening hours rather than a ticket, booking or receipt; then kind other, place = the place's name, and facts = its address, the opening hours shown, phone and website.
+- placeListing = true for a phone screenshot of a map or a place page rather than a ticket, booking or receipt: Google Maps or Apple Maps (a map with a red pin and a place name, or a place card with rating stars, "Directions", "Call", "Share", "Save", "Overview / Reviews / Photos" tabs, "Open / Closed · Opens 11 AM", an address), an Instagram profile, a TripAdvisor or Foursquare page. Then kind other, place = the place's name, and facts = its address, the opening hours shown, phone and website. Set it even when only part of the card is visible.
 - If the document is unreadable or unrelated, use kind other and a confidence of 0.3 or less.`;
 
 function classifyPrompt(C, name, today, needText = false) {

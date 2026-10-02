@@ -1155,31 +1155,55 @@ async function ingestFile(file, { from = 'docs', dayHint = null } = {}) {
         if (prop?.usage) { try { trackUsage(api.estimateCost(state.ai.model, prop.usage), prop.usage); } catch {} }
       } catch (e) { console.warn(e); prop = null; try { why = (await aiApi()).friendlyError(e).message; } catch { why = 'The AI could not read it.'; } }
     }
-    // a screenshot of a place (Google Maps, Instagram …) sent in the chat is a question about that place, not a document to file
-    if ((chat || from === 'share') && prop?.placeListing && f.type === 'image' && aiReady() && !state.aiBusy) {
-      // other files shared together wait until this answer is done (so the chat is not left mid-answer)
-      const held = from === 'share' ? (state.inbox || []).splice(0) : [];
-      if (chat) { const i = state.chat.indexOf(chat); if (i >= 0) state.chat.splice(i, 1); const me = state.chat[state.chat.length - 1]; if (me?.me) me.text = `📍 ${prop.place || 'A place'} (screenshot)`; }
-      else { if (route().a !== 'ask') { go('#ask'); await new Promise(r => setTimeout(r, 200)); } else closeSheet(); state.chat.push({ me: true, text: `📍 ${prop.place || 'A place'} (screenshot)` }); }
-      const box = $('#chatInput'), typed = (box?.value || '').trim(); if (box) box.value = '';
-      // everything read from the picture goes along as text too (the hours check and "Try again" use it)
-      const seen = [prop.place, ...(prop.facts || []), prop.transcript && String(prop.transcript).slice(0, 1500)].filter(Boolean).join('; ');
-      await sendAi(`${typed || 'Where is this place, which trip day fits it best (after which stop), and is it open then?'}${seen ? `\n\nScreenshot shows: ${seen}` : ''}`,
-        { echo: !!typed, shown: typed, attachments: [{ name: f.name, mime: f.mime, base64: I.toBase64(f.bytes) }] });
-      if (held.length) { state.inbox = held; nextShared(); }
-      return;
-    }
+    // a screenshot of a place (Google Maps, Instagram …) sent in the chat or shared to the app: a question about that place, not a document to file
+    const raw = prop, sure = f.type === 'image' && !!raw?.placeListing;
+    if (sure && (chat || from === 'share') && aiReady() && !state.aiBusy) return askPlace({ file: f, prop: raw, text: String(raw.transcript || ''), from, chat });
     if (!prop) prop = I.classifyText(text, C(), { filename: file.name, today: todayISO() });
     if (!text && prop.transcript) text = String(prop.transcript);   // a photo or scan: the AI wrote down its text
     prop = { ...pickProp(prop), todos: Array.isArray(prop.todos) ? prop.todos.slice(0, 4) : [], expense: prop.expense || null };
     if (!prop.dayIso && dayHint && !['insurance', 'id'].includes(prop.kind)) { prop.dayIso = dayHint; prop.tripN = null; }
     if (!prop.title) prop.title = kindLabel(prop.kind);
     state.draft = { prop, file: f, text, why, from, chat };
+    // it may be a map or place page rather than a document: ask instead of guessing
+    if (f.type === 'image' && (sure || looksLikePlace(raw, file.name, text))) return askIsPlace();
     openProposal();
   } catch (e) {
     console.error(e);
     if (chat) { chat.working = false; chat.error = e.message || 'Could not read that file.'; renderChat(false); } else { closeSheet(); toast(e.message || 'Could not read that file.', 3500); }
   }
+}
+// a map or a place page: Android names screenshots after the app ("Screenshot_…_Maps.jpg"); otherwise what the AI read gives it away
+const MAP_HINT = /(directions|yol tarifi|opens? (at )?\d|closed ?·|open now|open 24 hours|24 saat|reviews|overview|ask maps|google maps|apple maps|street view|★|\d[.,]\d ?\(\d|(^|\s)(sk|cad|cd|mah)\.|sokak|sokağı|caddesi|mahallesi)/i;
+function looksLikePlace(raw, name, text) {
+  if (/(^|[_\-\s])maps?([_\-\s.]|$)|google ?maps/i.test(name || '')) return true;
+  if (!raw) return false;
+  if (raw.ref || raw.bookingId || raw.expense || raw.isIdDocument || ['flight', 'hotel', 'transfer', 'receipt', 'insurance', 'id'].includes(raw.kind)) return false;
+  return MAP_HINT.test([raw.title, raw.summary, raw.place, ...(raw.facts || []), ...(raw.notes || []), raw.transcript, text].filter(Boolean).join(' '));
+}
+function askIsPlace() {
+  const d = state.draft;
+  if (d.chat) { d.chat.status = 'Is it a place or a document? Choose below.'; paintMsg(d.chat); }
+  openSheet(`<h3>${ico('pin')} Is this a place from Google Maps?</h3>
+    <p class="sub">It looks like a map or a place page${d.prop?.place ? `: <b>${esc(d.prop.place)}</b>` : ''}.</p>
+    <div class="btn-row" style="margin-top:14px"><button class="btn primary wide" data-act="shot-place">${ico('pin', 'sm')} Yes: where is it and which day fits?</button>
+    <button class="btn ghost wide" data-act="shot-doc">${ico('paperclip', 'sm')} No, save it as a document</button></div>`);
+}
+// a place screenshot becomes a chat question: where it is, which trip day fits, is it open then
+async function askPlace({ file: f, prop = {}, text = '', from, chat }) {
+  if (!aiReady()) { toast('Checking a place needs the smart chat: be online with Gemini on (Settings).', 4000); return false; }
+  if (state.aiBusy) { toast('Wait for the answer in progress, then send the screenshot again.', 3500); return false; }
+  const I = await intakeMod();
+  const held = from === 'share' ? (state.inbox || []).splice(0) : [];   // other shared files wait until this answer is done
+  const label = `📍 ${prop.place || 'A place'} (screenshot)`;
+  if (chat) { const i = state.chat.indexOf(chat); if (i >= 0) state.chat.splice(i, 1); const me = state.chat[state.chat.length - 1]; if (me?.me) me.text = label; }
+  else { if (route().a !== 'ask') { go('#ask'); await new Promise(r => setTimeout(r, 200)); } else closeSheet(); state.chat.push({ me: true, text: label }); }
+  const box = $('#chatInput'), typed = (box?.value || '').trim(); if (box) box.value = '';
+  // everything read from the picture goes along as text too (the hours check and "Try again" use it)
+  const seen = [prop.place, ...(prop.facts || []), text && String(text).slice(0, 1500)].filter(Boolean).join('; ');
+  await sendAi(`${typed || 'Where is this place, which trip day fits it best (after which stop), and is it open then?'}${seen ? `\n\nScreenshot shows: ${seen}` : ''}`,
+    { echo: !!typed, shown: typed, attachments: [{ name: f.name, mime: f.mime, base64: I.toBase64(f.bytes) }] });
+  if (held.length) { state.inbox = held; nextShared(); }
+  return true;
 }
 function tripOpts(iso, sel) {
   const trips = iso ? (dayBy(iso)?.trips || []) : [];
@@ -1208,6 +1232,7 @@ function openProposal() {
       ${ex && !edit ? `<label class="check full"><input type="checkbox" id="pExp" checked> <span>Add ${esc(exText)} to the spending log</span></label>` : ''}
       ${!edit ? (p.todos || []).map((t, k) => `<label class="check full"><input type="checkbox" data-ptodo="${k}" checked> <span>Remind me: ${esc(t.title)}${t.due ? ' · ' + esc(dateLabel(t.due)) : ''}</span></label>`).join('') : ''}
       <div class="full"><button class="btn primary wide" id="pSave">${ico('check', 'sm')} ${edit ? 'Save changes' : 'Save it'}</button></div>
+      ${!edit && d.file?.type === 'image' ? `<div class="full"><button type="button" class="linkbtn small" data-act="shot-place">${ico('pin', 'sm')} It is a place from Google Maps, not a document: ask where it fits</button></div>` : ''}
       ${edit ? `<div class="full btn-row"><button type="button" class="btn ghost" data-doc="u:${esc(d.edit)}">${ico('filetext', 'sm')} Open</button><button type="button" class="btn ghost danger" data-act="udoc-del">${ico('trash', 'sm')} Delete</button></div>` : ''}
     </form>`);
   $('#pTrip').disabled = !p.dayIso;
@@ -1725,6 +1750,14 @@ async function act(a, el) {
     case 'forget': if (confirm('Forget the passphrase on this phone? You will need to type it again.')) lockNow(true); break;
     case 'reset-todos': if (confirm('Untick every to-do, on every phone?')) { for (const t of C().todos) if (isDone(t)) setDone(t.id, false); render(); } break;
     case 'reset-exp': if (confirm('Delete every logged expense, on every phone? This cannot be undone.')) { for (const e of state.expenses) delExpense(e.id); render(); } break;
+    // "is this a Google Maps place?": yes → the chat answers about the place; no → the save form
+    case 'shot-place': {
+      const d = state.draft; if (!d?.file) break;
+      state.draft = null; closeSheet();
+      if (!(await askPlace({ file: d.file, prop: d.prop || {}, text: d.text || '', from: d.from, chat: d.chat }))) { state.draft = d; openProposal(); }
+      break;
+    }
+    case 'shot-doc': if (state.draft) { if (state.draft.chat) { state.draft.chat.status = 'Reading…'; paintMsg(state.draft.chat); } openProposal(); } break;
     case 'reset-chat': if (confirm('Clear the whole chat on this phone?')) { try { state.aiBusy?.abort(); } catch {} clearTimeout(chatSaveT); state.chat = []; state.aiHistory = []; state.prevOffline = null; await idbDel('chat'); toast('Chat cleared'); } break;
     case 'add-doc': pickFile(route().a === 'ask' ? 'chat' : 'docs', el.dataset.iso || null); break;
     case 'note-add': if (await ensureWriteKey()) openNoteSheet(el.dataset.iso); break;
