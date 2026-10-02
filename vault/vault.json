@@ -1,0 +1,13 @@
+{
+ "v": 3,
+ "kdf": {
+  "name": "PBKDF2",
+  "hash": "SHA-256",
+  "iterations": 600000,
+  "salt": "h74UiCEBIXAogfSpxp0iyg=="
+ },
+ "cipher": "AES-GCM-256",
+ "probe": "vault/755b7fd9b0d30b0d.enc",
+ "content": "vault/1b7329cc08c7e2ba.enc",
+ "built": "2026-10-02T16:14:51"
+}

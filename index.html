@@ -5,121 +5,95 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Türkiye 2026</title>
 <meta name="description" content="Private trip companion. Content is encrypted.">
-<meta name="theme-color" content="#0B1F3A" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0B1420" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#14213D" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0B1220" media="(prefers-color-scheme: dark)">
 <meta name="color-scheme" content="light dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Türkiye">
 <meta name="robots" content="noindex, nofollow">
+<meta name="app-build" content="20261002-161451">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png">
 <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 
-<!-- ───────────────────────── LOCK SCREEN ───────────────────────── -->
-<section id="lock" class="lock" aria-label="Unlock">
+<!-- ───────────── LOCK ───────────── -->
+<section id="lock" class="lock pending" aria-label="Unlock">
   <div class="lock-card">
-    <img class="lock-icon" src="./icons/icon-192.png" alt="" width="84" height="84">
+    <img class="lock-icon" src="./icons/icon-192.png" alt="" width="76" height="76">
     <h1 class="lock-title">Türkiye 2026</h1>
-    <p class="lock-sub">Antalya · Istanbul · 11–25 October</p>
+    <p class="lock-sub">Private trip companion</p>
     <form id="lockForm" autocomplete="off">
       <label class="field">
         <span class="field-label">Passphrase</span>
         <span class="field-row">
-          <input id="pass" type="password" inputmode="text" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="word-word-word-word-word-00" required>
-          <button type="button" id="togglePass" class="ghost small" aria-label="Show passphrase">Show</button>
+          <input id="pass" type="password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Your passphrase" required>
+          <button type="button" id="togglePass" class="btn ghost sm" aria-label="Show passphrase">Show</button>
         </span>
       </label>
       <label class="check"><input type="checkbox" id="remember" checked> <span>Remember this device</span></label>
-      <button type="submit" id="unlockBtn" class="primary wide">Unlock</button>
+      <button type="submit" id="unlockBtn" class="btn primary wide">Unlock</button>
       <p id="lockMsg" class="lock-msg" role="status"></p>
     </form>
-    <p class="lock-foot">Everything in this app is encrypted on the device. Nothing personal is readable without the passphrase.</p>
+    <p class="lock-foot">Everything inside is encrypted. Without the passphrase this app is empty.</p>
   </div>
 </section>
 
-<!-- ───────────────────────── APP ───────────────────────── -->
+<!-- ───────────── APP ───────────── -->
 <div id="app" class="app" hidden>
   <header class="topbar">
-    <div class="topbar-left">
-      <img src="./icons/icon-192.png" alt="" width="28" height="28" class="topbar-icon">
-      <div>
-        <div class="topbar-title">Türkiye 2026</div>
-        <div id="topbarSub" class="topbar-sub">Antalya · Istanbul</div>
-      </div>
-    </div>
-    <button id="settingsBtn" class="iconbtn" aria-label="Settings"></button>
+    <button class="icon-btn" id="backBtn" aria-label="Back" hidden></button>
+    <div class="topbar-title"><span id="viewTitle">Today</span><small id="viewSub"></small></div>
+    <button class="icon-btn" id="settingsBtn" aria-label="Settings"></button>
   </header>
-
-  <main id="main" class="main">
-    <section id="view-today" class="view" data-view="today"></section>
-    <section id="view-days" class="view" data-view="days" hidden></section>
-    <section id="view-bookings" class="view" data-view="bookings" hidden></section>
-    <section id="view-money" class="view" data-view="money" hidden></section>
-    <section id="view-tips" class="view" data-view="tips" hidden></section>
-  </main>
-
-  <div id="instBar" class="instbar" hidden role="region" aria-label="Install">
-    <img src="./icons/icon-192.png" alt="" width="36" height="36">
-    <div class="instbar-text"><b>Add Türkiye 2026 to your home screen</b><span>Opens like an app and works offline</span></div>
-    <button type="button" id="instBtn" class="instbar-go">Install</button>
-    <button type="button" id="instDismiss" class="instbar-x" aria-label="Not now">×</button>
-  </div>
-
+  <div id="updateBar" class="update-bar" hidden><span>A new version is ready.</span><button class="btn sm light" id="updateNow">Update now</button></div>
+  <main id="view" class="view" tabindex="-1"></main>
   <nav class="tabbar" aria-label="Sections">
-    <button class="tab is-active" data-tab="today"><span class="tab-ico" data-ico="today"></span><span>Today</span></button>
-    <button class="tab" data-tab="days"><span class="tab-ico" data-ico="days"></span><span>Days</span></button>
-    <button class="tab" data-tab="bookings"><span class="tab-ico" data-ico="ticket"></span><span>Bookings</span></button>
-    <button class="tab" data-tab="money"><span class="tab-ico" data-ico="wallet"></span><span>Money</span></button>
-    <button class="tab" data-tab="tips"><span class="tab-ico" data-ico="bulb"></span><span>Tips</span></button>
+    <button data-tab="today" class="tab"><span class="tab-ico"></span><span>Today</span></button>
+    <button data-tab="days" class="tab"><span class="tab-ico"></span><span>Days</span></button>
+    <button data-tab="ask" class="tab tab-ask"><span class="tab-ico"></span><span>Ask</span></button>
+    <button data-tab="docs" class="tab"><span class="tab-ico"></span><span>Docs</span></button>
+    <button data-tab="more" class="tab"><span class="tab-ico"></span><span>More</span></button>
   </nav>
 </div>
 
-<!-- ───────────────────────── PDF VIEWER ───────────────────────── -->
-<div id="viewer" class="viewer" hidden>
-  <div class="viewer-bar">
-    <button id="viewerClose" class="iconbtn light" aria-label="Close"></button>
-    <div class="viewer-title" id="viewerTitle">Document</div>
-    <div class="viewer-actions">
-      <a id="viewerDownload" class="iconbtn light" aria-label="Save or share" download></a>
-      <a id="viewerOpen" class="iconbtn light" aria-label="Open in new tab" target="_blank" rel="noopener"></a>
-    </div>
+<!-- document viewer -->
+<div id="viewer" class="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="viewerTitle">
+  <div class="overlay-bar">
+    <button class="icon-btn" id="viewerClose" aria-label="Close"></button>
+    <div class="overlay-title" id="viewerTitle">Document</div>
+    <a class="icon-btn" id="viewerDownload" aria-label="Save" download></a>
   </div>
-  <div id="viewerBody" class="viewer-body"></div>
+  <div class="viewer-body" id="viewerBody"></div>
 </div>
 
-<!-- ───────────────────────── SETTINGS SHEET ───────────────────────── -->
-<div id="sheet" class="sheet" hidden>
-  <div class="sheet-backdrop" data-close></div>
-  <div class="sheet-panel" role="dialog" aria-label="Settings">
-    <div class="sheet-handle"></div>
-    <h2>Settings</h2>
-    <div id="installBox" class="settings-block"></div>
-    <div class="settings-block">
-      <label class="field"><span class="field-label">Lira per dirham (planning rate)</span>
-        <span class="field-row"><input id="rateInput" type="number" step="0.01" min="5" max="30"><button id="rateLive" class="ghost small" type="button">Use live 13.24</button></span>
-      </label>
-    </div>
-    <div class="settings-block row-buttons">
-      <button id="lockNow" class="ghost">Lock now</button>
-      <button id="forgetDevice" class="ghost danger">Forget this device</button>
-    </div>
-    <div class="settings-block row-buttons">
-      <button id="resetTodos" class="ghost">Reset to-dos</button>
-      <button id="resetExpenses" class="ghost danger">Delete all expenses</button>
-    </div>
-    <p id="versionLine" class="muted small"></p>
-  </div>
+<!-- image zoom -->
+<div id="zoom" class="overlay dark" hidden role="dialog" aria-modal="true">
+  <div class="overlay-bar"><button class="icon-btn" id="zoomClose" aria-label="Close"></button><div class="overlay-title" id="zoomTitle"></div><span></span></div>
+  <div class="zoom-body"><img id="zoomImg" alt=""></div>
 </div>
 
-<div id="toast" class="toast" hidden></div>
+<!-- show-the-driver card -->
+<div id="driver" class="overlay driver" hidden role="dialog" aria-modal="true">
+  <div class="overlay-bar"><button class="icon-btn" id="driverClose" aria-label="Close"></button><div class="overlay-title">Show the driver</div><span></span></div>
+  <div class="driver-body"><p id="driverTr" class="driver-tr"></p><p id="driverEn" class="driver-en"></p></div>
+</div>
+
+<!-- bottom sheet -->
+<div id="sheet" class="sheet-wrap" hidden>
+  <div class="sheet-scrim" data-close-sheet></div>
+  <div class="sheet" role="dialog" aria-modal="true"><div class="sheet-grip"></div><div id="sheetBody"></div></div>
+</div>
+
+<div id="toast" class="toast" hidden role="status"></div>
+
+<!-- file pickers: a ticket or document to add, and a backup to restore -->
+<input type="file" id="docInput" accept="application/pdf,image/*,audio/*" hidden>
+<input type="file" id="restoreInput" accept="application/json,.json" hidden>
 
 <script type="module" src="./app.js"></script>
 </body>

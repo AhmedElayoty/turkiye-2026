@@ -1,19 +1,30 @@
 {
   "name": "Türkiye 2026",
   "short_name": "Türkiye",
-  "description": "Antalya and Istanbul, 11–25 October 2026. Private trip companion.",
+  "description": "Private trip companion with a trip assistant.",
   "id": "./",
-  "start_url": "./",
+  "start_url": "./#today",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0B1F3A",
-  "theme_color": "#0B1F3A",
+  "background_color": "#14213D",
+  "theme_color": "#14213D",
   "lang": "en",
   "categories": ["travel"],
   "icons": [
     { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
     { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "share_target": {
+    "action": "./share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": { "files": [{ "name": "files", "accept": ["application/pdf", ".pdf", "image/*"] }] }
+  },
+  "shortcuts": [
+    { "name": "Today", "url": "./#today" },
+    { "name": "Ask", "url": "./#ask" },
+    { "name": "Documents", "url": "./#docs" }
   ]
 }
