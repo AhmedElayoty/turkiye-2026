@@ -47,29 +47,39 @@ const tag = (e, where) => { try { if (e && typeof e === 'object' && !e.where) e.
 /* Booking PINs, the Skywards number and card digits stay in the app; the model links the booking button instead.
    Passport numbers and birth dates are scrubbed from anything taken from documents. */
 const secretMemo = new WeakMap();
-function secretsOf(C) {
+// their own numbers (hotel PINs, the loyalty number, card digits) travel to Google as named codes ({{PIN:hotel-istanbul-arise}});
+// the app puts the real number back on the phone (fillSecrets), so the chat can show it without Google ever seeing it
+export function secretsOf(C) {
   if (!C || typeof C !== 'object') return [];
   if (secretMemo.has(C)) return secretMemo.get(C);
-  const set = new Set();
+  const list = [], add = (key, value) => { if (S(value).length >= 3 && !list.some((x) => x.value === S(value))) list.push({ key, value: S(value) }); };
+  const ENDING = /\b(?:ending|ends) (?:in )?(\d{4})\b/gi;
   for (const b of C.bookings || []) {
-    if (S(b.pin).length >= 3) set.add(S(b.pin));
-    for (const m of S(b.loyalty).match(/[A-Z]{0,3}-?\d{6,}/g) || []) { set.add(m); set.add(m.replace(/^\D+/, '')); }
+    add(`PIN:${b.id}`, b.pin);
+    for (const m of S(b.loyalty).match(/[A-Z]{0,3}-?\d{6,}/g) || []) { add(`LOYALTY:${b.id}`, m); add(`LOYALTY:${b.id}`, m.replace(/^\D+/, '')); }
+    let bj = ''; try { bj = JSON.stringify(b); } catch {}
+    for (const m of bj.matchAll(ENDING)) add(`CARD:${b.id}`, m[1]);
   }
   let all = ''; try { all = JSON.stringify(C); } catch {}
-  for (const m of all.matchAll(/\b(?:ending|ends) (?:in )?(\d{4})\b/gi)) set.add(m[1]);
-  const out = [...set].filter((x) => x.length >= 3).sort((a, b) => b.length - a.length);
+  for (const m of all.matchAll(ENDING)) add('CARD:other', m[1]);
+  const out = list.sort((a, b) => b.value.length - a.value.length);
   secretMemo.set(C, out);
   return out;
 }
+export function fillSecrets(text, C) {
+  const list = secretsOf(C);
+  return String(text == null ? '' : text).replace(/\{\{\s*((?:PIN|LOYALTY|CARD):[\w-]+)\s*\}\}/g, (m, key) => list.find((x) => x.key === key)?.value ?? '[see the booking card]');
+}
 const luhn = (d) => { let s = 0; for (let i = 0; i < d.length; i++) { let n = +d[d.length - 1 - i]; if (i % 2) { n *= 2; if (n > 9) n -= 9; } s += n; } return s % 10 === 0; };
 export function redactSecrets(text, C) {
-  let x = String(text == null ? '' : text)
+  let x = String(text == null ? '' : text);
+  for (const s of secretsOf(C)) x = x.replace(new RegExp(`(^|[^\\w])${esc(s.value)}(?![\\w])`, 'g'), `$1{{${s.key}}}`);
+  x = x
     .replace(/\b(PIN(?: code)?)(\s*[:#]?\s*)\d{3,8}\b/gi, '$1$2[in the app]')
     .replace(/\b(ending|ends)( in)?(\s*)\d{4}\b/gi, '$1$2$3[in the app]')
     .replace(/\b(Skywards|loyalty|frequent[- ]flyer|Miles ?& ?Smiles)([^\n\d]{0,20}?)[A-Z]{0,3}-?\d{6,}/gi, '$1$2[in the app]')
     .replace(/\b\d{4}([ -])\d{4}\1\d{4}\1\d{4}\b/g, '[card number removed]')
     .replace(/\b\d{16}\b/g, (d) => (luhn(d) ? '[card number removed]' : d));
-  for (const v of secretsOf(C)) x = x.replace(new RegExp(`(^|[^\\w])${esc(v)}(?![\\w])`, 'g'), '$1[in the app]');
   return x;
 }
 const OLD_DATE = /\b(19\d{2}|200\d)[-./](0?[1-9]|1[0-2])[-./](0?[1-9]|[12]\d|3[01])\b|\b(0?[1-9]|[12]\d|3[01])[-./](0?[1-9]|1[0-2])[-./](19\d{2}|200\d)\b/g;
@@ -341,9 +351,9 @@ export function tripContext(C) {
       }
       add(`- ${b.id} · ${J([b.kind, b.status, b.phase])} · ${J([S(b.title), S(b.subtitle)], ' — ')}`);
       add('  ' + J([S(b.dates), b.checkin && `check-in ${S(b.checkin)}`, b.checkout && `check-out ${S(b.checkout)}`, b.confirmation && `confirmation ${b.confirmation}`,
-        b.pin && `PIN: in the app (app:booking/${b.id})`, b.via && `via ${cut(b.via, 40)}`, b.deadline && `deadline ${b.deadline}`]));
+        b.pin && `PIN ${S(b.pin)}`, b.via && `via ${cut(b.via, 40)}`, b.deadline && `deadline ${b.deadline}`]));
       if (b.legs?.length) add('  Flights: ' + b.legs.map((l) => `${l.flight} ${S(l.from)} → ${S(l.to)}${l.seats ? ` seats ${S(l.seats)}` : ''}`).join('; '));
-      add('  ' + J([b.cabin && `Cabin ${S(b.cabin)}`, b.bags && `Bags ${S(b.bags)}`, b.tickets && `Tickets ${S(b.tickets)}`, b.loyalty && `Loyalty ${S(b.loyalty)} (number in the app)`,
+      add('  ' + J([b.cabin && `Cabin ${S(b.cabin)}`, b.bags && `Bags ${S(b.bags)}`, b.tickets && `Tickets ${S(b.tickets)}`, b.loyalty && `Loyalty ${S(b.loyalty)}`,
         b.room && `Room ${S(b.room)}`, b.board && `Board: ${S(b.board)}`, b.price && `Price ${S(b.price)}`, b.guests && `Guests ${S(b.guests)}`]));
       add('  ' + J([b.address && `Address ${S(b.address)}`, b.phone && `Phone ${b.phone}`, b.whatsapp && `WhatsApp ${b.whatsapp}`, b.cancel && `Cancellation: ${S(b.cancel)}`]));
       if (b.notes?.length) add('  Notes: ' + b.notes.map(S).join(' | '));
@@ -1122,9 +1132,9 @@ When they describe something that happened or could happen (illness, fever, food
 5. One closing line: Demir decides each claim; when unsure, call them before paying.
 Cover applies only inside Türkiye, from entry on 11 Oct until they leave on 25 Oct. Never promise that a claim will be paid. For symptoms be practical (pharmacy = "Eczane"; Demir can name the nearest suitable clinic), give no diagnosis, and urge 112 for anything serious. If INSURANCE is missing from TRIP DATA, say the policy details are not loaded and give 112 and the numbers above.
 
-# Privacy
-- Booking PINs, the Skywards (loyalty) number and payment-card digits are deliberately kept out of this chat; they show as "[in the app]". When they ask for one, say it is on the booking card in the app and add that booking's button, e.g. [Hotel booking](app:booking/<booking id>). Never guess them.
-- Never write passport numbers, dates of birth or full card numbers, even when a document shows them.`;
+# Their own numbers and documents (it is their app: give them what they ask for)
+- Hotel PINs, the Skywards (loyalty) number and card digits appear in TRIP DATA as codes such as {{PIN:hotel-istanbul-arise}}. When they ask for one, write that code exactly where the number goes, e.g. "The door PIN for Arise is **{{PIN:hotel-istanbul-arise}}**": the app shows them the real number. Copy codes exactly; never guess or invent a number. "[in the app]" means a number that is only on the booking card: add that booking's button.
+- Passport, ID and visa copies they added are listed as documents of kind id: when they ask for their passport (or "my passport copy"), give it as a button, e.g. [Ahmed's passport](app:doc/u:<id>). Passport numbers and dates of birth are not in TRIP DATA: for those, give the passport copy (or the insurance certificate, which shows them). If no copy was added, say they can add one with the paperclip.`;
 
 const systemText = (C) => `${SYSTEM}\n\n${tripContext(C)}`;
 

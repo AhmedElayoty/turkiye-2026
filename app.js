@@ -834,6 +834,7 @@ async function aiApi() {
   const m = await aiMod();
   if (TEST_BUILD && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(QS.get('aibase') || '')) m.setBaseURL(QS.get('aibase'));   // QA mock, test builds only
   if (!state.aiModels) state.aiModels = m.MODELS;
+  if (!state.fill) state.fill = (t) => m.fillSecrets(t, C());   // also while an answer streams in
   return m;
 }
 function trackUsage(usd, usage) {
@@ -921,7 +922,7 @@ function paintMsg(m) {
     if (nearBottom) window.scrollTo(0, document.documentElement.scrollHeight);
   });
 }
-const DOCQ = /(ticket|e-?ticket|boarding|booking|voucher|confirmation|reservation|certificate|policy|insurance|(real|original|actual) (file|pdf|document)|تذكر|تذاكر|حجز|بوليص|تأمين|شهاد)/i;
+const DOCQ = /(ticket|e-?ticket|boarding|booking|voucher|confirmation|reservation|certificate|policy|insurance|passport|visa|id card|(real|original|actual) (file|pdf|document)|تذكر|تذاكر|حجز|بوليص|تأمين|شهاد|جواز|باسبور|تأشير|فيزا|هوي)/i;
 async function sendAi(q, { voice = false, attachments = [], echo = true, shown = null } = {}) {
   const msg = { ai: true, text: '', status: 'Thinking…', streaming: true };
   if (echo) state.chat.push({ me: true, text: shown ?? (voice ? '🎤 ' : '') + q });
@@ -936,9 +937,11 @@ async function sendAi(q, { voice = false, attachments = [], echo = true, shown =
     const res = await api.chatTurn({ apiKey: state.ai.key, model: state.ai.model, webSearch: true, searchKey: setting('searchKey'), history: state.aiHistory, user: { text: q, attachments },
       content: C(), live: liveInfo(), handlers: H, signal: ctrl.signal,
       onText: (dt) => { msg.text += dt; msg.status = null; paintMsg(msg); }, onStatus: (s) => { msg.status = s; paintMsg(msg); } });
-    if (res.text) msg.text = res.text;
+    // their own numbers come back as codes ({{PIN:…}}): the real numbers are put in here, on the phone
+    const fill = (t) => api.fillSecrets(t, C());
+    if (res.text) msg.text = fill(res.text);
     const slug = (t) => String(t || 'answer').replace(/ı/g, 'i').normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_-]+/g, '-').slice(0, 50) || 'answer';
-    msg.pdfs = (res.pdfs || []).map(p => ({ ...p, filename: /\.pdf$/i.test(p.filename || '') ? p.filename : `Turkiye-2026-${slug(p.title)}.pdf` }));
+    msg.pdfs = (res.pdfs || []).map(p => JSON.parse(fill(JSON.stringify(p)))).map(p => ({ ...p, filename: /\.pdf$/i.test(p.filename || '') ? p.filename : `Turkiye-2026-${slug(p.title)}.pdf` }));
     msg.citations = res.citations || [];
     msg.sugg = (res.searchSuggestions || []).slice(0, 5).map(x => x.html).filter(Boolean);
     // which model answered when the best one could not (busy, slow or out of free requests)
@@ -977,7 +980,7 @@ function aiMsgHtml(m, i) {
     + (m.docs || []).map(a => `<button class="btn sm primary" data-doc="${esc(a.id)}">${ico('ticket', 'sm')} ${esc(a.label)}</button>`).join('');
   const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return 'source'; } };
   return `<div class="msg bot ai" data-msg="${i}"><div class="ai-tag">${ico('sparkles', 'sm')} ${AI_NAME}${m.streaming ? ' <span class="typing"><i></i><i></i><i></i></span>' : ''}</div>
-    ${m.text ? `<div class="md">${md(m.text)}</div>` : ''}
+    ${m.text ? `<div class="md">${md(state.fill ? state.fill(m.text) : m.text)}</div>` : ''}
     ${m.status && m.streaming ? `<div class="ai-status">${esc(m.status)}</div>` : ''}
     ${m.error ? `<div class="callout red">${esc(m.error)}</div>` : ''}${m.note ? `<p class="small">${esc(m.note)}</p>` : ''}
     ${m.retry && !m.streaming ? `<div class="msg-actions"><button class="btn sm ghost" data-ask="${esc(m.retry)}">${ico('refresh', 'sm')} Try again</button></div>` : ''}
@@ -1224,7 +1227,7 @@ function openProposal() {
   const ex = p.expense, exText = ex ? `${ex.currency === 'TRY' ? fmtTry(ex.amount) : ex.currency === 'AED' ? fmtAed(ex.amount) : `${ex.currency} ${ex.amount}`} as ${ex.category}` : '';
   openSheet(`<h3>${ico(kindIcon(p.kind))} ${edit ? 'Change this document' : 'Here is what I found'}</h3>
     <p class="sub">${edit ? esc(d.name || '') : (['claude', 'ai'].includes(p.source) ? `✨ Read by ${AI_NAME}` : 'Read on this phone') + sure}${d.why ? ` · the AI was not available: ${esc(d.why)}` : ''}</p>
-    ${p.isIdDocument ? `<div class="callout red" style="margin-top:10px">This looks like a passport, ID or visa. The app keeps those out on purpose. Save it only if you are sure.</div>` : ''}
+    ${p.isIdDocument ? `<div class="callout sea" style="margin-top:10px">${ico('shield', 'sm')} Passport / ID copy: saved encrypted like everything else, on both phones, and the chat hands it back when you ask for it.</div>` : ''}
     ${bk ? `<div class="callout sea" style="margin-top:10px">This matches “${esc(bk.title)}”. It will be kept as an extra copy.</div>` : ''}
     ${p.summary ? `<p class="b-p" dir="auto" style="margin-top:10px">${esc(p.summary)}</p>` : ''}
     ${(p.notes || []).length ? `<ul class="b-list small">${p.notes.slice(0, 4).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}

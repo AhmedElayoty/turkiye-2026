@@ -714,7 +714,7 @@ export function classifyText(text, content, { filename = '', today = null, done 
   /* summary and notes */
   const when = date ? `${dateLabel(date)}${time ? ' ' + time : ''}` : '';
   let summary;
-  if (kind === 'id') summary = 'Identity document. It stays encrypted on this phone and is never shown in the chat.';
+  if (kind === 'id') summary = 'Passport / ID copy. Saved encrypted like your other documents; ask the chat for it any time.';
   else if (kind === 'insurance') {
     const insurer = INSURERS.find(([k]) => cnt([k], 1))?.[1];
     const lim = /annual limit(?![a-z])[\s\S]{0,120}?(\d{1,3}(?:[.,]\d{3})+|\d{4,})\s*(usd|eur|try|tl)\b/i.exec(T);
