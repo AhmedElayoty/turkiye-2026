@@ -333,7 +333,7 @@ export function tripContext(C) {
   }
 
   if (C.bookings?.length) {
-    add('', '## BOOKINGS (open with app:booking/<id>; documents with app:doc/<file id>)');
+    add('', '## BOOKINGS (app:booking/<id> = the app\'s summary card; app:doc/<file id> = the real ticket / confirmation PDF)');
     for (const b of C.bookings) {
       if (b.status === 'cancelled') {
         add(`- ${b.id} · ${b.kind} · CANCELLED · ${J([S(b.title), S(b.dates), b.confirmation && `confirmation ${b.confirmation}`, b.file && `file ${b.file}`])}. ${S(b.cancel)} ${(b.notes || []).map(S).join(' ')}`);
@@ -347,13 +347,15 @@ export function tripContext(C) {
         b.room && `Room ${S(b.room)}`, b.board && `Board: ${S(b.board)}`, b.price && `Price ${S(b.price)}`, b.guests && `Guests ${S(b.guests)}`]));
       add('  ' + J([b.address && `Address ${S(b.address)}`, b.phone && `Phone ${b.phone}`, b.whatsapp && `WhatsApp ${b.whatsapp}`, b.cancel && `Cancellation: ${S(b.cancel)}`]));
       if (b.notes?.length) add('  Notes: ' + b.notes.map(S).join(' | '));
-      const files = [b.file && `${b.file} (booking)`, ...(b.more || []).map((x) => `${x.file} (${S(x.label)})`)].filter(Boolean);
-      add('  ' + J([files.length && `Files: ${files.join(', ')}`, b.driverCard && `Driver card: ${b.driverCard}`]));
+      // the real PDF (what they mean by "my ticket") is not the booking card: say so plainly
+      const real = { flight: 'the e-ticket itself', hotel: 'the hotel confirmation itself', transfer: 'the transfer voucher itself' }[b.kind] || 'the booking document itself';
+      const files = [b.file && `app:doc/${b.file} = ${real} (the original PDF)`, ...(b.more || []).map((x) => `app:doc/${x.file} = ${S(x.label)}`)].filter(Boolean);
+      add('  ' + J([files.length && `Real files: ${files.join(', ')}`, b.driverCard && `Driver card: ${b.driverCard}`]));
     }
   }
   if (C.files?.length) {
     const maps = C.files.filter((f) => /^map-d\d+$/.test(f.id));
-    add('', '## FILES (app:doc/<id>)', [...C.files.filter((f) => !maps.includes(f)).map((f) => `${f.id}: ${S(f.title)}`),
+    add('', '## FILES (the real PDFs and images; open with app:doc/<id>)', [...C.files.filter((f) => !maps.includes(f)).map((f) => `${f.id}: ${S(f.title)}`),
       maps.length && `${maps[0].id} … ${maps[maps.length - 1].id}: route map of each day (map-dNN = Day NN)`].filter(Boolean).join('; '));
   }
 
@@ -484,8 +486,9 @@ export const TOOL_DEFS = [
   fn('search_trip', 'Asks the app\'s offline trip assistant and returns its answer as text. It knows the bookings, ferry timetables, food and shisha '
     + 'stops, phrases, sights and opening hours, tips and the insurance rules. Use it to double-check one specific fact you cannot find in TRIP DATA.',
     { query: str('A short question in English, e.g. "hotel check-in time" or "ferry back from Kadıköy".') }, ['query']),
-  fn('create_pdf', 'Creates a downloadable PDF for the user; the app shows it as a button under your reply. Call it when the user asks for a PDF, '
-    + 'something printable or shareable, or says "send me" a plan, list or summary. Write the whole document in English (Latin script) even when the chat '
+  fn('create_pdf', 'Creates a NEW downloadable PDF for the user; the app shows it as a button under your reply. Call it when the user asks for a PDF, '
+    + 'something printable or shareable, or says "send me" a plan, list or summary. Never call it for a ticket, booking, voucher or certificate they already '
+    + 'have: link the real file with app:doc/<file id> instead. Write the whole document in English (Latin script) even when the chat '
     + 'is in Arabic, because the PDF font has no Arabic letters; keep Turkish letters and ₺. Use exact times, prices, addresses, phone numbers and booking '
     + 'references from TRIP DATA. After calling it, reply with one short sentence; never paste the PDF content into the chat.',
     {
@@ -1088,6 +1091,7 @@ Use only these forms, with ids that exist in TRIP DATA or <app_state>:
 - a map: [Map](https://www.google.com/maps/search/?api=1&query=Carlos+Terrace+Istanbul)
 - any other https link (sources, official sites).
 End an answer with one to three helpful buttons when they help (the next ticket, the day, a call). Never make up an id or a link.
+- When they ask for a ticket, e-ticket, boarding pass, booking or hotel confirmation, voucher, insurance certificate, or "the real / original / PDF" of anything they have: give the REAL file as a button, e.g. [Open the e-ticket](app:doc/flight-auh-ayt) (the "Real files" of that booking in BOOKINGS, or FILES, or app:doc/u:<id> for a document they added). It opens the original PDF, which they can save or share from there. The booking card (app:booking/<id>) is only the app's summary: add it as a second button if useful, never instead of the file. Never make a PDF for this. If they mean one of several (outbound, Istanbul, home), give the one that fits, or all of them as buttons when unclear.
 
 # Tools that change things
 - add_expense when they say they paid, spent or bought something with an amount: the amount and currency as said, the best category, a short note, and the date if not today. Never log planned or prepaid costs; if the amount or currency is unclear, ask.
@@ -1107,7 +1111,7 @@ Then answer in this order:
 6. If the place is far from both cities, say how far (hours by road) and whether it is realistic as a day trip on a free day.
 
 # PDFs
-When they ask for a PDF, something printable or shareable, or "send me" a plan or list, call create_pdf with a complete, well-structured document (headings, short paragraphs, bullets, tables, callouts, key-value rows) using exact times, prices, addresses, phones and references from TRIP DATA. English only, keep Turkish letters. Then reply with ONE short sentence; never paste the PDF content into the chat.
+create_pdf makes a NEW document. Never use it to give or send a ticket, booking, voucher or certificate they already have: link the real file instead (see App links). When they ask for a PDF, something printable or shareable, or "send me" a plan or list, call create_pdf with a complete, well-structured document (headings, short paragraphs, bullets, tables, callouts, key-value rows) using exact times, prices, addresses, phones and references from TRIP DATA. English only, keep Turkish letters. Then reply with ONE short sentence; never paste the PDF content into the chat.
 
 # Insurance: "this happened"
 When they describe something that happened or could happen (illness, fever, food poisoning, injury, accident, hospital, allergy, toothache, theft, a lost passport or luggage, damage to someone's property, a delayed or missed flight, bad news from home …), judge it against INSURANCE in TRIP DATA (the policy rules and the Situations list) and answer in this order:

@@ -921,6 +921,7 @@ function paintMsg(m) {
     if (nearBottom) window.scrollTo(0, document.documentElement.scrollHeight);
   });
 }
+const DOCQ = /(ticket|e-?ticket|boarding|booking|voucher|confirmation|reservation|certificate|policy|insurance|(real|original|actual) (file|pdf|document)|تذكر|تذاكر|حجز|بوليص|تأمين|شهاد)/i;
 async function sendAi(q, { voice = false, attachments = [], echo = true, shown = null } = {}) {
   const msg = { ai: true, text: '', status: 'Thinking…', streaming: true };
   if (echo) state.chat.push({ me: true, text: shown ?? (voice ? '🎤 ' : '') + q });
@@ -945,6 +946,11 @@ async function sendAi(q, { voice = false, attachments = [], echo = true, shown =
     if (fb) msg.note = `Answered by ${fb.label}${fbs.length === 1 ? ` · ${fbs[0].fromLabel || 'the first model'} ${fbs[0].reason === 'daily' ? 'reached its free daily limit (back at 10:00 Türkiye time)' : fbs[0].reason === 'slow' ? 'was too slow' : 'was busy'}` : ' · the faster models above it were busy or slow'}.`;
     msg.undo = (res.actions || []).filter(a => ['todo', 'expense', 'note'].includes(a.type) && a.id);
     if ((res.actions || []).some(a => a.type === 'web_off') && !setting('searchKey')) msg.note = 'For live web search, add the free Tavily key in Settings → Smart chat.';
+    // asked for a ticket, booking, voucher or certificate but no real file in the answer: the built-in helper's matching files are added as buttons
+    if (DOCQ.test(q) && !/app:doc\//.test(msg.text || '')) {
+      try { msg.docs = (answer(q, ctx()).actions || []).filter(a => a.act === 'doc' && vaultFile(a.id)).slice(0, 3).map(a => ({ id: a.id, label: a.label || 'Open the document' })); } catch {}
+      if (msg.docs?.length && msg.pdfs?.length) msg.noAutoPdf = true;   // never download a made-up summary instead of the real ticket
+    }
     state.aiHistory = res.history || state.aiHistory;
     try { trackUsage(api.estimateCost(state.ai.model, res.usage || {}), res.usage); } catch {}
   } catch (e) {
@@ -962,12 +968,13 @@ async function sendAi(q, { voice = false, attachments = [], echo = true, shown =
     msg.streaming = false; msg.status = null; state.aiBusy = null; setSendMode(false); try { await lock?.release(); } catch {}
     renderChat(false);
     if (voice && msg.text && !msg.error) { try { (await voiceMod()).speak(msg.text); } catch {} }
-    if (msg.pdfs?.length && !msg.autoDone) { const i = state.chat.indexOf(msg); await exportPdf(msg.pdfs[0], $(`[data-aipdf="${i}:0"]`)); msg.autoDone = true; renderChat(false); }
+    if (msg.pdfs?.length && !msg.autoDone && !msg.noAutoPdf) { const i = state.chat.indexOf(msg); await exportPdf(msg.pdfs[0], $(`[data-aipdf="${i}:0"]`)); msg.autoDone = true; renderChat(false); }
   }
 }
 function aiMsgHtml(m, i) {
   const pdfs = (m.pdfs || []).map((p, j) => `<button class="btn sm primary" data-aipdf="${i}:${j}">${ico('download', 'sm')} ${m.autoDone && j === 0 ? 'Saved · download again' : esc('PDF · ' + (p.title || 'download'))}</button>`).join('');
-  const undo = (m.undo || []).map(a => `<button class="btn sm ghost" data-undo="${esc(a.type)}|${esc(a.id)}">${ico('undo', 'sm')} Undo ${esc(a.label || a.type)}</button>`).join('');
+  const undo = (m.undo || []).map(a => `<button class="btn sm ghost" data-undo="${esc(a.type)}|${esc(a.id)}">${ico('undo', 'sm')} Undo ${esc(a.label || a.type)}</button>`).join('')
+    + (m.docs || []).map(a => `<button class="btn sm primary" data-doc="${esc(a.id)}">${ico('ticket', 'sm')} ${esc(a.label)}</button>`).join('');
   const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return 'source'; } };
   return `<div class="msg bot ai" data-msg="${i}"><div class="ai-tag">${ico('sparkles', 'sm')} ${AI_NAME}${m.streaming ? ' <span class="typing"><i></i><i></i><i></i></span>' : ''}</div>
     ${m.text ? `<div class="md">${md(m.text)}</div>` : ''}
